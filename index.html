@@ -1,0 +1,2737 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ゴブリンの巣穴 Online</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
+    <style>
+        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+        body { 
+            margin: 0; background: #000; overflow: hidden; 
+            font-family: 'DotGothic16', sans-serif;
+            display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh;
+            color: white;
+        }
+        #game-wrapper { position: relative; }
+        #game-container { position: relative; width: 1024px; height: 576px; background: #111; overflow: hidden; box-shadow: 0 0 20px #333; }
+        
+        /* 入場ゲート画面 */
+        #gate-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 100;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+        }
+        .gate-input {
+            background: #000; border: 1px solid #555; color: #fff;
+            font-family: 'DotGothic16', sans-serif; font-size: 24px;
+            text-align: center; width: 200px; padding: 5px; margin-bottom: 20px;
+            outline: none;
+        }
+        .gate-btn {
+            background: #222; border: 1px solid #fff; color: #fff;
+            font-family: 'DotGothic16', sans-serif; font-size: 20px;
+            padding: 5px 20px; cursor: pointer;
+        }
+        .gate-btn:hover { background: #444; }
+
+        @keyframes greyTrip {
+            0% { filter: saturate(1.2) hue-rotate(-15deg) contrast(1.1); }
+            50% { filter: saturate(1.2) hue-rotate(15deg) contrast(1.1); }
+            100% { filter: saturate(1.2) hue-rotate(-15deg) contrast(1.1); }
+        }
+        .grey-mode-canvas {
+            animation: greyTrip 5s infinite ease-in-out;
+        }
+        
+        canvas { 
+            display: block;
+            image-rendering: pixelated; 
+        }
+        .game-input-area {
+            position: absolute; background: transparent; border: none; outline: none;
+            color: white; font-family: 'DotGothic16', sans-serif; text-align: center;
+            display: none; padding: 0; margin: 0; resize: none; overflow: hidden; line-height: 1.2;
+            z-index: 10;
+        }
+        .game-input-area:disabled, .game-input-line:disabled {
+            color: #888; cursor: not-allowed;
+        }
+        .game-input-line {
+            position: absolute; background: transparent; border: none; outline: none;
+            color: white; font-family: 'DotGothic16', sans-serif; text-align: center; display: none;
+            z-index: 10;
+        }
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;
+            display: none;
+        }
+        #info-panel { 
+            position: absolute; top: 10px; left: 10px; color: #0f0; font-size: 14px; 
+            padding: 10px; background: rgba(0,0,0,0.7); border-radius: 8px; line-height: 1.6; 
+            display: none; 
+        }
+        #signal-message {
+            position: absolute; top: 35%; left: 50%; transform: translate(-50%, -50%);
+            color: #ff0; font-size: 28px; text-shadow: 1px 1px 0 #000;
+            opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 30;
+            background: rgba(0,0,0,0.6); padding: 10px 30px; border-radius: 15px; 
+            border: 2px solid rgba(255,255,255,0.5);
+            letter-spacing: 2px; text-align: center; white-space: pre-wrap;
+        }
+        #result-rank {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #fff; font-size: 28px; background: rgba(0,0,0,0.9); padding: 40px 60px;
+            border-radius: 30px; display: none; text-align: center; line-height: 1.8;
+            width: 80%; box-shadow: 0 0 30px #0ff; pointer-events: auto; z-index: 20;
+        }
+        #controls-help {
+            margin-top: 10px; color: #aaa; font-size: 14px; text-align: center; width: 1024px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-wrapper">
+    <div id="game-container">
+        <div id="gate-screen">
+            <input type="text" id="gate-pass" class="gate-input" maxlength="10">
+            <button id="gate-btn" class="gate-btn">決定</button>
+        </div>
+
+        <canvas id="gameCanvas"></canvas>
+        
+        <textarea id="nameInput" class="game-input-area" maxlength="100"></textarea>
+        <input type="text" id="passInput" class="game-input-line" maxlength="6">
+
+        <div id="ui-layer">
+            <div id="info-panel"></div>
+            <div id="signal-message"></div>
+            <div id="result-rank">
+                <div id="guild-comment"></div>
+                <div id="rank-grade" style="font-size: 60px; color: #ff0; margin: 10px 0;"></div>
+                <div id="rank-time" style="font-size:20px; margin:20px 0;"></div>
+                <div id="restart-hint" style="font-size:16px; color:#aaa; margin-top:20px;"></div>
+            </div>
+        </div>
+    </div>
+    <div id="controls-help"></div>
+</div>
+
+<script>
+// --- Xorshift乱数生成クラス ---
+class Xorshift {
+    constructor(seed = 88675123) {
+        this.x = 123456789;
+        this.y = 362436069;
+        this.z = 521288629;
+        this.w = seed;
+    }
+    nextFloat() {
+        let t = this.x ^ (this.x << 11);
+        this.x = this.y; this.y = this.z; this.z = this.w;
+        this.w = (this.w ^ (this.w >>> 19)) ^ (t ^ (t >>> 8));
+        return (this.w >>> 0) / 4294967296;
+    }
+}
+
+function hashCode(str) {
+    let hash = 0;
+    if (str.length === 0) return hash;
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash |= 0; 
+    }
+    return Math.abs(hash) + 1;
+}
+
+// --- グローバル変数 ---
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const nameEl = document.getElementById('nameInput');
+const passEl = document.getElementById('passInput');
+const uiLayer = document.getElementById('ui-layer');
+const infoPanel = document.getElementById('info-panel');
+const signalMsgEl = document.getElementById('signal-message');
+const controlsHelpEl = document.getElementById('controls-help');
+
+// ゲート用要素
+const gateScreen = document.getElementById('gate-screen');
+const gatePassInput = document.getElementById('gate-pass');
+const gateBtn = document.getElementById('gate-btn');
+
+let rnd = new Xorshift(); 
+
+let savedBgm = localStorage.getItem('goblinsNest_bgmVol');
+let bgmVolume = savedBgm !== null ? parseFloat(savedBgm) : 0.5;
+let savedSe = localStorage.getItem('goblinsNest_seVol');
+let seVolume = savedSe !== null ? parseFloat(savedSe) : 0.5;
+
+nameEl.value = localStorage.getItem('goblinsNest_name') || "";
+passEl.value = localStorage.getItem('goblinsNest_pass') || "";
+
+const VIRTUAL_WIDTH = 1024;
+const VIRTUAL_HEIGHT = 576;
+canvas.width = VIRTUAL_WIDTH;
+canvas.height = VIRTUAL_HEIGHT;
+
+let gameState = 'gate'; 
+let isDraggingBGM = false;
+let isDraggingSE = false;
+
+// --- 通信・マッチング関連 ---
+const PEER_ID_PREFIX = 'gn_beta1_'; 
+let peer = null;
+let conn = null;
+let isMatching = false; 
+let isConnected = false; 
+let isHost = false; 
+let guestInputState = { dx: 0, dy: 0, attack: false }; 
+
+// 名前同期用変数
+let p1Name = "Player1";
+let p2Name = "Player2";
+
+let playCount = 0;
+let isGreyMode = false;
+let isDebugMode = false; 
+let psychicArrays = []; 
+
+const BAR_W = 80, BAR_H = 15;
+const UI_X = VIRTUAL_WIDTH - (BAR_W + 20), UI_Y_START = 30;
+
+const titleBgImg = new Image(); titleBgImg.src = 'assets/bg/title_bg.png';
+const titleBGM = new Audio('assets/bgm/title_bgm.mp3'); titleBGM.loop = true;
+const clearBGM = new Audio('assets/bgm/clear.mp3'); clearBGM.loop = true; 
+
+// ダンジョン定数
+const TILE_SIZE = 8;
+const ZOOM = 7;
+const SCALED_TILE = TILE_SIZE * ZOOM; 
+const VIEW_TILES_X = 18;
+const VIEW_TILES_Y = 10; 
+const DARKNESS_WIDTH = VIEW_TILES_X * SCALED_TILE; 
+const DARKNESS_HEIGHT = VIEW_TILES_Y * SCALED_TILE; 
+const GAME_OFFSET_X = (VIRTUAL_WIDTH - DARKNESS_WIDTH) / 2; 
+const GAME_OFFSET_Y = (VIRTUAL_HEIGHT - DARKNESS_HEIGHT) / 2; 
+
+const GRID_W = 100;
+const GRID_H = 100;
+const DIRS = [[0,-1],[1,0],[0,1],[-1,0]]; 
+const VISION_RADIUS = 3; 
+const IDLE_COOLDOWN = 2000;
+const CHASE_COOLDOWN = 1000;
+const GOBLIN_ATTACK_INTERVAL = 650;
+const GREY_ARRAY_COOLDOWN = 3000; 
+const RAGE_COOLDOWN = 400;
+const GOBLIN_LOOK_INTERVAL = 300;
+const GOBLIN_UPDATE_INTERVAL = 80;
+const MINIMAP_UPDATE_INTERVAL = 200;
+const ATTACK_SHAKE = 2;
+const HIT_SHAKE_DURATION = 120;
+const HIT_SHAKE_POWER = 3;
+const ATTACK_SCALE_START = 1.3;
+const IFRAME_DURATION = 500;
+const SMELL_RADIUS = 3;
+const SIGHT_RADIUS = 7;
+const DAUGHTER_OFFSET_Y = 0.3;
+const ATTACK_COOLDOWN = 0.1;
+
+const STATE = { IDLE: 'idle', ALERT: 'alert', LOCK: 'lock', RAGE: 'rage', CHARGE: 'charge', REAPPEAR: 'reappear', DYING: 'dying' };
+
+// 視界用
+const visionRadius = (VISION_RADIUS + 0.5) * SCALED_TILE;
+const visionSize = visionRadius * 2;
+
+const visionHoleCanvas = document.createElement('canvas');
+visionHoleCanvas.width = visionSize; visionHoleCanvas.height = visionSize;
+const vhCtx = visionHoleCanvas.getContext('2d');
+const vhGrad = vhCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
+vhGrad.addColorStop(0, "rgba(0,0,0,1)");        
+vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");      
+vhGrad.addColorStop(1, "rgba(0,0,0,0)");        
+vhCtx.fillStyle = vhGrad;
+vhCtx.beginPath(); vhCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); vhCtx.fill();
+
+const dreamyGlowCanvas = document.createElement('canvas');
+dreamyGlowCanvas.width = visionSize; dreamyGlowCanvas.height = visionSize;
+const dgCtx = dreamyGlowCanvas.getContext('2d');
+const dgGrad = dgCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
+dgGrad.addColorStop(0, "rgba(0, 255, 100, 0.2)");
+dgGrad.addColorStop(0.3, "rgba(0, 255, 100, 0.1)");
+dgGrad.addColorStop(0.8, "rgba(0, 0, 0, 0)");
+dgCtx.fillStyle = dgGrad;
+dgCtx.beginPath(); dgCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); dgCtx.fill();
+
+// --- ★修正: アセット数 50 -> 56 に拡張 ---
+const FLOOR_COLORS_56 = [];
+// 0-49: HSL Standard
+for(let i=0; i<50; i++) {
+    const hue = (i * 137.5) % 360; 
+    const sat = 30 + (i % 5) * 10; 
+    const light = 20 + (i % 3) * 10; 
+    FLOOR_COLORS_56.push(`hsl(${hue}, ${sat}%, ${light}%)`);
+}
+// 50-55: Special Colors (白, 黒, 金, 銀, 銅, プラチナ)
+FLOOR_COLORS_56.push("#e0e0e0"); // 50: White-ish
+FLOOR_COLORS_56.push("#2a2a2a"); // 51: Black-ish (Not too dark)
+FLOOR_COLORS_56.push("#c5b358"); // 52: Gold
+FLOOR_COLORS_56.push("#c0c0c0"); // 53: Silver
+FLOOR_COLORS_56.push("#cd7f32"); // 54: Bronze
+FLOOR_COLORS_56.push("#e5e4e2"); // 55: Platinum
+
+let floorColorBag = [];
+let lastStageColor = null;
+
+const NORMAL_BGMS_56 = Array.from({length: 56}, (_, i) => `assets/bgm/normal_${i+1}.mp3`);
+const RAGE_BGMS_56 = Array.from({length: 56}, (_, i) => `assets/bgm/rage_${i+1}.mp3`);
+let normalBgmBag = [], rageBgmBag = [], lastNormalBgm = null, lastRageBgm = null;
+let currentStageBgm = { normal: null, rage: null };
+let currentAudio = null;
+let currentMusicState = 'normal';
+
+const floorTileImg = new Image(); floorTileImg.src = 'assets/floor/floor_tile.png';
+const goblinImages = { front: new Image(), back: new Image(), side: new Image() };
+goblinImages.front.src = 'assets/goblin/goblin_front.png';
+goblinImages.back.src = 'assets/goblin/goblin_back.png';
+goblinImages.side.src = 'assets/goblin/goblin_side.png'; 
+const goblinAttackImg = new Image(); goblinAttackImg.src = 'assets/goblin/goblin_attack.png';
+
+const greyImg = new Image(); greyImg.src = 'assets/enemies/grey.png';
+const greySpaceFloorImg = new Image(); greySpaceFloorImg.src = 'assets/tiles/grey_space.png';
+const greyCircleImg = new Image(); greyCircleImg.src = 'assets/effects/grey_circle.png';
+const greyBGM = new Audio('assets/bgm/bgm_grey.mp3'); greyBGM.loop = true;
+
+const playerImages = { front: new Image(), back: new Image(), right1: new Image(), right2: new Image() };
+playerImages.front.src = 'assets/player/player1_front.png';
+playerImages.back.src = 'assets/player/player1_back.png';
+playerImages.right1.src = 'assets/player/player1_right1.png';
+playerImages.right2.src = 'assets/player/player1_right2.png';
+const playerAttackImg = new Image(); playerAttackImg.src = 'assets/player/player_attack.png';
+
+const daughterImg = new Image(); daughterImg.src = 'assets/daughter/daughter.png';
+const biscuitImg = new Image(); biscuitImg.src = 'assets/items/biscuit.png';
+
+const SE = {
+    goblinAttack: [new Audio('assets/se/goblin_attack1.wav'), new Audio('assets/se/goblin_attack2.wav')],
+    goblinHit: [new Audio('assets/se/goblin_hit1.wav'), new Audio('assets/se/goblin_hit2.wav')],
+    playerAttack1: new Audio('assets/se/player_attack1.wav'),
+    playerAttack2: new Audio('assets/se/player_attack2.wav'),
+    playerHit1: new Audio('assets/se/player_hit1.wav'),
+    playerHit2: new Audio('assets/se/player_hit2.wav')
+};
+Object.values(SE).flat().forEach(audio => { audio.preload = 'auto'; });
+
+// ゲーム変数
+let grid = [], floorVariant = [];
+let player1 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0};
+let player2 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0};
+let daughter = {x: 0, y: 0, rescued: false, rescuer: null};
+let healingBiscuit = {x: -1, y: -1, active: false};
+let goblins = [];
+let rooms = [];
+let attackEffects = [];
+let hpP1 = 10, hpP2 = 10;
+let lastAttackTimeP1 = 0, lastAttackTimeP2 = 0;
+let p1LastHitTime = 0, p2LastHitTime = 0;
+let startTime = 0, fixedTime = 0;
+let timerStopped = false, foundDaughter = false, foundDaughterNotified = false, gameCleared = false, isGameOver = false;
+let distanceToDaughter = 0;
+let shortestPathSteps = 0; 
+let startLeftX = 0, startRightX = 0, startBottomY = 0;
+
+let floorCanvas = document.createElement('canvas');
+let floorCtx = floorCanvas.getContext('2d');
+let floorDrawn = false;
+let darknessCanvas = document.createElement('canvas');
+let darknessCtx = darknessCanvas.getContext('2d');
+darknessCanvas.width = DARKNESS_WIDTH; darknessCanvas.height = DARKNESS_HEIGHT;
+let minimapCanvas = document.createElement('canvas');
+let minimapCtx = minimapCanvas.getContext('2d');
+let minimapFloorCanvas = document.createElement('canvas');
+let minimapFloorCtx = minimapFloorCanvas.getContext('2d');
+let minimapFloorDrawn = false;
+let lastMinimapUpdate = 0;
+let currentStageColor = null;
+
+// --- 合図システム状態（合意制） ---
+let signalState = { 
+    active: false, 
+    type: null, // 'R' or 'W'
+    p1: false,  
+    p2: false,  
+    startTime: 0,
+    agreedTime: 0 // 合意成立時刻 (2秒待機用)
+};
+
+// --- 入場ゲート処理 ---
+if (localStorage.getItem('goblinsNest_gatePassed')) {
+    gateScreen.style.display = 'none';
+    gameState = 'title';
+}
+
+gatePassInput.addEventListener('input', () => {
+    gatePassInput.value = gatePassInput.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+});
+
+gateBtn.addEventListener('click', () => {
+    if (gatePassInput.value.toLowerCase() === 'cave') {
+        gateScreen.style.display = 'none';
+        gameState = 'title';
+        localStorage.setItem('goblinsNest_gatePassed', 'true');
+        playClickSound();
+    } else {
+        gatePassInput.value = '';
+        gateScreen.style.backgroundColor = '#200';
+        setTimeout(() => gateScreen.style.backgroundColor = '#000', 100);
+    }
+});
+
+function update() {
+    if (gameState === 'gate') {
+        requestAnimationFrame(update);
+        return;
+    }
+
+    if(titleBGM) titleBGM.volume = bgmVolume;
+    if(clearBGM) clearBGM.volume = bgmVolume;
+    if(currentAudio) currentAudio.volume = (currentMusicState==='rage' ? 0.5 : 0.4) * bgmVolume * 2.5;
+    
+    if(greyBGM) {
+        let greyVolFactor = 0.0;
+        if (isGreyMode && gameState === 'game' && !gameCleared && !isGameOver) {
+            let minDist = Infinity;
+            goblins.forEach(g => {
+                if (g.hp > 0) {
+                    const d1 = Math.abs(g.x - player1.x) + Math.abs(g.y - player1.y);
+                    const d2 = Math.abs(g.x - player2.x) + Math.abs(g.y - player2.y);
+                    minDist = Math.min(minDist, d1, d2);
+                }
+            });
+            const CLOSE_DIST = 3;
+            const FAR_DIST = 14;
+            if (minDist <= CLOSE_DIST) greyVolFactor = 1.0;
+            else if (minDist >= FAR_DIST) greyVolFactor = 0.0;
+            else {
+                greyVolFactor = 1.0 - (minDist - CLOSE_DIST) / (FAR_DIST - CLOSE_DIST);
+            }
+        }
+        greyBGM.volume = 0.4 * bgmVolume * 2.5 * greyVolFactor;
+    }
+
+    // 合図の時間切れリセット
+    if (signalState.active && !signalState.agreedTime && performance.now() - signalState.startTime > 3000) {
+        signalState.active = false;
+        signalState.p1 = false;
+        signalState.p2 = false;
+        signalMsgEl.style.opacity = 0;
+    }
+
+    updateInputPosition(); 
+    
+    // --- オンライン同期ロジック ---
+    if (gameState === 'game') {
+        if (!isDebugMode) { 
+            if (isHost) {
+                // ホスト: P2の入力反映
+                if (guestInputState.dx !== 0 || guestInputState.dy !== 0) {
+                    movePlayer(player2, guestInputState.dx, guestInputState.dy);
+                    guestInputState.dx = 0; guestInputState.dy = 0; 
+                }
+                // ★修正: 攻撃フラグは「処理した瞬間」にfalseにする
+                if (guestInputState.attack) {
+                    playerAttack(player2);
+                    guestInputState.attack = false;
+                }
+
+                // ★合図の合意判定（ホストのみ実行）
+                if (signalState.active && signalState.p1 && signalState.p2) {
+                    if (!signalState.agreedTime) {
+                        signalState.agreedTime = performance.now(); // 合意成立時刻を記録
+                    } else {
+                        // 2秒経過したら実行
+                        if (performance.now() - signalState.agreedTime > 2000) {
+                            if (signalState.type === 'R') {
+                                startDungeonGame(false); 
+                            } else if (signalState.type === 'W') {
+                                if (conn && conn.open) conn.send({ type: 'GO_TITLE' });
+                                location.reload();
+                            }
+                        }
+                    }
+                }
+
+                gameLoopStep(); 
+
+                if (conn && conn.open) {
+                    const state = {
+                        type: 'SYNC',
+                        p1: { x: player1.x, y: player1.y, f: player1.facing, sc: player1.stepCount },
+                        p2: { x: player2.x, y: player2.y, f: player2.facing, sc: player2.stepCount },
+                        hp: { p1: hpP1, p2: hpP2 },
+                        d: { x: daughter.x, y: daughter.y, r: daughter.rescued, er: daughter.rescuer },
+                        g: goblins.map(g => ({
+                            x: g.x, y: g.y, f: g.facing, s: g.state, hp: g.hp, 
+                            sc: g.sizeScale, bo: g.bobOffset,
+                            dt: g.deathTime, da: g.deathAngle, dp: g.dissolveProgress,
+                            ic: g.isCasting
+                        })),
+                        sig: signalState, 
+                        t: (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime,
+                        cl: gameCleared,
+                        go: isGameOver,
+                        gm: isGreyMode
+                    };
+                    conn.send(state);
+                }
+            }
+        } else {
+            gameLoopStep();
+        }
+    }
+
+    draw(); 
+    requestAnimationFrame(update);
+}
+
+function updateInputPosition() {
+    const rect = canvas.getBoundingClientRect();
+    const scale = rect.width / VIRTUAL_WIDTH;
+
+    let nameSize = 34; let paddingTop = 32;
+    if (nameEl.value.length > 25) { nameSize = 24; paddingTop = 15; }
+    if (nameEl.value.length > 60) { nameSize = 18; paddingTop = 5; }
+    nameEl.style.left = (162 * scale) + "px";
+    nameEl.style.top = (160 * scale) + "px";
+    nameEl.style.width = (700 * scale) + "px";
+    nameEl.style.height = (100 * scale) + "px";
+    nameEl.style.fontSize = (nameSize * scale) + "px";
+    nameEl.style.paddingTop = (paddingTop * scale) + "px";
+    
+    if (gameState === 'matching' && isMatching) {
+        nameEl.disabled = true;
+        passEl.disabled = true;
+    } else {
+        nameEl.disabled = false;
+        passEl.disabled = false;
+    }
+
+    nameEl.style.display = (gameState === 'matching') ? 'block' : 'none';
+
+    passEl.style.left = (362 * scale) + "px";
+    passEl.style.top = (312 * scale) + "px";
+    passEl.style.width = (300 * scale) + "px";
+    passEl.style.height = (56 * scale) + "px";
+    passEl.style.fontSize = (35 * scale) + "px";
+    passEl.style.display = (gameState === 'matching') ? 'block' : 'none';
+    
+    if (gameState === 'title') {
+        controlsHelpEl.innerText = "クリック/Enter: 開始";
+    } else if (gameState === 'matching') {
+        if (isConnected) {
+            controlsHelpEl.innerText = "クリック: 合流して開始！";
+        } else if (isMatching) {
+            controlsHelpEl.innerText = "待機中... クリック: キャンセル (合言葉変更)";
+        } else {
+            controlsHelpEl.innerText = "クリック: 待機開始 (ホスト判定)";
+        }
+    } else if (gameState === 'game') {
+        if (isDebugMode) {
+             controlsHelpEl.innerText = "【P1】移動:矢印 攻撃:Z 【P2】移動:WASD 攻撃:X | R:リスタート | [DEBUG MODE]";
+        } else {
+             if (isHost) {
+                 controlsHelpEl.innerText = "【P1(あなた)】移動:矢印 攻撃:Z | 【P2(相棒)】操作待受中 | R:合図";
+             } else {
+                 controlsHelpEl.innerText = "【P2(あなた)】移動:矢印 攻撃:Z | 【P1(相棒)】操作待受中 | R:合図";
+             }
+        }
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+    if (gameState === 'game') {
+        drawGameScreen();
+    } else {
+        if (titleBgImg.complete) ctx.drawImage(titleBgImg, 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        else { ctx.fillStyle="#222"; ctx.fillRect(0,0,VIRTUAL_WIDTH,VIRTUAL_HEIGHT); }
+        if (gameState === 'title') drawTitleScreen();
+        else if (gameState === 'matching') drawMatchingScreen();
+    }
+    drawTriangleVolumeBar("BGM", UI_Y_START, bgmVolume);
+    drawTriangleVolumeBar("SE", UI_Y_START + 35, seVolume);
+}
+
+function drawTriangleVolumeBar(label, y, volume) {
+    ctx.fillStyle = "white"; ctx.font = "14px 'DotGothic16'"; ctx.textAlign = "right";
+    ctx.fillText(label, UI_X - 10, y + 13);
+    ctx.beginPath();
+    ctx.moveTo(UI_X, y + BAR_H); ctx.lineTo(UI_X + BAR_W, y); ctx.lineTo(UI_X + BAR_W, y + BAR_H);
+    ctx.closePath();
+    ctx.strokeStyle = "white"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(UI_X, y + BAR_H);
+    const curX = UI_X + (BAR_W * volume);
+    const curY = y + BAR_H - (BAR_H * volume);
+    ctx.lineTo(curX, curY); ctx.lineTo(curX, y + BAR_H); ctx.closePath();
+    ctx.fillStyle = "#00ff00"; ctx.fill();
+}
+
+function drawTitleScreen() {
+    ctx.textAlign = "center";
+    ctx.fillStyle = "black"; ctx.font = "80px 'DotGothic16'";
+    ctx.fillText("ゴブリンの巣穴", VIRTUAL_WIDTH / 2 + 4, VIRTUAL_HEIGHT / 2 + 4);
+    ctx.fillStyle = "white"; ctx.fillText("ゴブリンの巣穴", VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2);
+    if (Math.floor(Date.now() / 500) % 2 === 0) {
+        ctx.font = "34px 'DotGothic16'";
+        ctx.fillText("- PRESS TO START -", VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2 + 100);
+    }
+}
+
+function drawMatchingScreen() {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.85)"; ctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+    ctx.fillStyle = "white"; ctx.textAlign = "center";
+    ctx.font = "28px 'DotGothic16'";
+    ctx.fillText("名前", VIRTUAL_WIDTH / 2, 145);
+    ctx.fillText("合言葉", VIRTUAL_WIDTH / 2, 290);
+    ctx.strokeStyle = "white"; ctx.lineWidth = 2;
+    ctx.strokeRect(VIRTUAL_WIDTH/2 - 350, 160, 700, 100);
+    ctx.strokeRect(VIRTUAL_WIDTH/2 - 150, 305, 300, 60);
+
+    if (isConnected) {
+        ctx.fillStyle = "#ff0000"; 
+        ctx.fillRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
+        ctx.strokeStyle = "#ffaaaa"; ctx.lineWidth = 4;
+        ctx.strokeRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
+        
+        ctx.fillStyle = "white";
+        ctx.font = "30px 'DotGothic16'"; ctx.fillText("合流", VIRTUAL_WIDTH / 2, 482);
+    } else if (isMatching) {
+        if (Math.floor(Date.now() / 400) % 2 === 0) {
+            ctx.strokeStyle = "#ffff00"; ctx.lineWidth = 4;
+            ctx.strokeRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
+            ctx.fillStyle = "#ffff00";
+            ctx.font = "30px 'DotGothic16'"; ctx.fillText("待機中", VIRTUAL_WIDTH / 2, 482);
+        } else {
+            ctx.strokeStyle = "#555"; ctx.lineWidth = 4;
+            ctx.strokeRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
+            ctx.fillStyle = "#888";
+            ctx.font = "30px 'DotGothic16'"; ctx.fillText("待機中", VIRTUAL_WIDTH / 2, 482);
+        }
+        
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        ctx.fillRect(VIRTUAL_WIDTH/2 - 350, 160, 700, 100);
+        ctx.fillRect(VIRTUAL_WIDTH/2 - 150, 305, 300, 60);
+
+    } else {
+        ctx.strokeStyle = "white"; ctx.lineWidth = 4;
+        ctx.strokeRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
+        ctx.fillStyle = "white";
+        ctx.font = "30px 'DotGothic16'"; ctx.fillText("待機", VIRTUAL_WIDTH / 2, 482);
+        
+        ctx.lineWidth = 2;
+        ctx.strokeRect(VIRTUAL_WIDTH - 150, VIRTUAL_HEIGHT - 80, 100, 40);
+        ctx.font = "20px 'DotGothic16'"; ctx.fillText("予演", VIRTUAL_WIDTH - 100, VIRTUAL_HEIGHT - 53);
+    }
+}
+
+function drawWrapText(text, x, y, maxWidth, lineHeight) {
+    let words = text.split(""); let line = ""; let currentY = y;
+    let fSize = 28; if (text.length > 25) fSize = 20; if (text.length > 60) fSize = 16;
+    ctx.font = fSize + "px 'DotGothic16'";
+    for(let n = 0; n < words.length; n++) {
+        let testLine = line + words[n];
+        if (ctx.measureText(testLine).width > maxWidth && n > 0) {
+            ctx.fillText(line, x, currentY); line = words[n]; currentY += lineHeight;
+        } else { line = testLine; }
+    }
+    ctx.fillText(line, x, currentY);
+}
+
+// ゲームロジック
+function shuffle(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(rnd.nextFloat() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
+function refillBag(source, lastUsed) {
+    let bag = source.slice();
+    if (lastUsed !== null) {
+        const idx = bag.indexOf(lastUsed);
+        if (idx !== -1) bag.splice(idx, 1);
+    }
+    shuffle(bag);
+    return bag;
+}
+
+function pickNextFloorColor() {
+    if (floorColorBag.length === 0) floorColorBag = refillBag(FLOOR_COLORS_56, lastStageColor);
+    lastStageColor = floorColorBag.pop();
+    return lastStageColor;
+}
+
+function pickStageBgms() {
+    if (normalBgmBag.length === 0) normalBgmBag = refillBag(NORMAL_BGMS_56, lastNormalBgm);
+    if (rageBgmBag.length === 0) rageBgmBag = refillBag(RAGE_BGMS_56, lastRageBgm);
+    lastNormalBgm = normalBgmBag.pop();
+    lastRageBgm = rageBgmBag.pop();
+    return { normal: lastNormalBgm, rage: lastRageBgm };
+}
+
+function fadeOut(audio, duration = 600) {
+    if (!audio) return;
+    const startVolume = audio.volume;
+    const steps = duration / 50; let step = 0;
+    const interval = setInterval(() => {
+        step++;
+        if(audio) audio.volume = Math.max(0, startVolume * (1 - step / steps));
+        if (step >= steps) { if(audio){ audio.pause(); audio.currentTime = 0; } clearInterval(interval); }
+    }, 50);
+}
+
+function stopCurrentBgm() {
+    if (currentAudio) { fadeOut(currentAudio); currentAudio = null; }
+    if (greyBGM && !greyBGM.paused) { fadeOut(greyBGM); }
+    currentMusicState = 'normal';
+}
+
+function playAndFadeIn(srcOrAudio, targetVolRatio, fadeDuration = 600) {
+    stopCurrentBgm();
+    let audio;
+    if (typeof srcOrAudio === 'string') {
+        audio = new Audio(srcOrAudio);
+    } else {
+        audio = srcOrAudio;
+        audio.currentTime = 0;
+    }
+    audio.loop = true; audio.volume = 0;
+    audio.play().catch(() => {});
+    
+    if (typeof srcOrAudio === 'string') currentAudio = audio;
+
+    const targetVolume = targetVolRatio * bgmVolume * 2.5; 
+    const steps = fadeDuration / 50; let step = 0;
+    const interval = setInterval(() => {
+        step++;
+        const ratio = step / steps;
+        audio.volume = targetVolume * ratio;
+        if (step >= steps) clearInterval(interval);
+    }, 50);
+}
+
+function playNormalBgm() { 
+    if (isGreyMode) {
+        playAndFadeIn(greyBGM, 0.4); 
+        currentMusicState = 'grey';
+    } else {
+        if (currentStageBgm.normal) playAndFadeIn(currentStageBgm.normal, 0.4); 
+        currentMusicState = 'normal'; 
+    }
+}
+
+function enterRageBgm() { 
+    if (isGreyMode) return; 
+    if (currentMusicState === 'rage') return;
+    if (currentStageBgm.rage) { playAndFadeIn(currentStageBgm.rage, 0.5); currentMusicState = 'rage'; }
+}
+
+function playSE(audioArrayOrSingle, volumeRatio = 0.6, pitchRand = 0.1, basePitch = 1.0) {
+    if (isGreyMode) return; 
+    const audio = Array.isArray(audioArrayOrSingle) ? audioArrayOrSingle[Math.floor(rnd.nextFloat() * audioArrayOrSingle.length)] : audioArrayOrSingle;
+    const clone = audio.cloneNode();
+    clone.currentTime = 0;
+    clone.volume = Math.min(1, volumeRatio * seVolume * 2); 
+    clone.playbackRate = basePitch + (rnd.nextFloat() - 0.5) * pitchRand;
+    clone.play().catch(() => {});
+}
+
+function playElectronicBlip() {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const actx = new AudioContext();
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.type = 'sine';
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    const now = actx.currentTime;
+    osc.frequency.setValueAtTime(1200, now);
+    osc.frequency.exponentialRampToValueAtTime(2000, now + 0.1);
+    const vol = seVolume * 0.5; 
+    gain.gain.setValueAtTime(vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+    osc.start(now);
+    osc.stop(now + 0.2);
+}
+
+function playSignalSound(type) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const actx = new AudioContext();
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    const now = actx.currentTime;
+    const vol = seVolume * 0.4;
+    if (type === 'R') { 
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1500, now);
+        osc.frequency.linearRampToValueAtTime(1400, now + 0.6);
+        gain.gain.setValueAtTime(vol * 0.3, now); 
+        gain.gain.linearRampToValueAtTime(0, now + 0.6);
+        osc.start(now);
+        osc.stop(now + 0.6);
+    } else if (type === 'W') { 
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.linearRampToValueAtTime(100, now + 1.5);
+        gain.gain.setValueAtTime(vol * 0.8, now);
+        gain.gain.linearRampToValueAtTime(0, now + 1.5);
+        osc.start(now);
+        osc.stop(now + 1.5);
+    }
+}
+
+function playClickSound() {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const actx = new AudioContext();
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.type = 'square';
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    const now = actx.currentTime;
+    const vol = seVolume * 0.5;
+    osc.frequency.setValueAtTime(800, now);
+    osc.frequency.exponentialRampToValueAtTime(100, now + 0.05);
+    gain.gain.setValueAtTime(vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+    osc.start(now);
+    osc.stop(now + 0.05);
+}
+
+function playChurchBell() {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const actx = new AudioContext();
+    const now = actx.currentTime;
+    const vol = seVolume * 0.8;
+    const ratios = [1, 2, 3, 4.2, 5.4];
+    const baseFreq = 300; 
+    ratios.forEach((ratio, index) => {
+        const osc = actx.createOscillator();
+        const gain = actx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(baseFreq * ratio, now);
+        const duration = 2.5 - (index * 0.4); 
+        osc.connect(gain);
+        gain.connect(actx.destination);
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(vol / (index + 1), now + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+        osc.start(now);
+        osc.stop(now + duration);
+    });
+}
+
+function calculateShortestPath() {
+    let startNode = {x: startLeftX, y: startBottomY};
+    let targetNode = {x: daughter.x, y: daughter.y};
+    
+    let queue = [{x: startNode.x, y: startNode.y, steps: 0}];
+    let visited = Array.from({length: GRID_H}, () => Array(GRID_W).fill(false));
+    visited[startNode.y][startNode.x] = true;
+
+    while(queue.length > 0) {
+        let curr = queue.shift();
+        if (curr.x === targetNode.x && curr.y === targetNode.y) {
+            return curr.steps;
+        }
+        for (let [dx, dy] of DIRS) {
+            let nx = curr.x + dx, ny = curr.y + dy;
+            if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H) {
+                if (grid[ny][nx] === 1 && !visited[ny][nx]) {
+                    visited[ny][nx] = true;
+                    queue.push({x: nx, y: ny, steps: curr.steps + 1});
+                }
+            }
+        }
+    }
+    return distanceToDaughter * 1.5; 
+}
+
+function startDungeonGame(debugFlag = isDebugMode) {
+    isDebugMode = debugFlag; 
+    
+    if (isDebugMode) {
+        rnd = new Xorshift(Date.now());
+        p1Name = "Player1";
+        p2Name = "Player2";
+    } else {
+        let seed = hashCode(passEl.value) || Date.now();
+        rnd = new Xorshift(seed);
+    }
+
+    playCount++; 
+    isGreyMode = (playCount >= 2 && rnd.nextFloat() < 0.01); 
+
+    if (isGreyMode) {
+        canvas.classList.add('grey-mode-canvas');
+    } else {
+        canvas.classList.remove('grey-mode-canvas');
+    }
+    
+    gameState = 'game';
+    titleBGM.pause();
+    clearBGM.pause(); clearBGM.currentTime = 0;
+    uiLayer.style.display = 'block';
+    nameEl.style.display = 'none'; passEl.style.display = 'none';
+    
+    if (isDebugMode) {
+        infoPanel.style.display = 'block';
+    } else {
+        infoPanel.style.display = 'none';
+    }
+    
+    // 合図状態の完全リセット
+    signalState = { active: false, type: null, startTime: 0, p1: false, p2: false, agreedTime: 0 };
+    signalMsgEl.style.opacity = 0;
+
+    floorColorBag = [];
+    normalBgmBag = [];
+    rageBgmBag = [];
+
+    if (!isDebugMode && isHost && conn && conn.open) {
+        conn.send({ type: 'START', seed: rnd.w });
+    }
+
+    generateDungeon();
+}
+
+function isPathValid() {
+    let visited = Array.from({length: GRID_H}, () => Array(GRID_W).fill(false));
+    let queue = [{x: startLeftX, y: startBottomY}];
+    visited[startBottomY][startLeftX] = true;
+
+    while(queue.length > 0) {
+        let curr = queue.shift();
+        if(curr.x === daughter.x && curr.y === daughter.y) return true;
+        for(let [dx, dy] of DIRS) {
+            let nx = curr.x + dx, ny = curr.y + dy;
+            if(nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H) {
+                if(grid[ny][nx] === 1 && !visited[ny][nx]) {
+                    visited[ny][nx] = true;
+                    queue.push({x: nx, y: ny});
+                }
+            }
+        }
+    }
+    return false; 
+}
+
+function addObstaclesToRooms() {
+    for (const room of rooms) {
+        if (room.w < 5 || room.h < 5) continue;
+        const attempts = Math.floor((room.w * room.h) / 20) + 1; 
+        
+        for (let i = 0; i < attempts; i++) {
+            const obW = Math.floor(rnd.nextFloat() * 3) + 2; 
+            const obH = Math.floor(rnd.nextFloat() * 3) + 2; 
+            const ox = room.x + 1 + Math.floor(rnd.nextFloat() * (room.w - obW - 1)); 
+            const oy = room.y + 1 + Math.floor(rnd.nextFloat() * (room.h - obH - 1)); 
+
+            let backup = [];
+            for(let dy=0; dy<obH; dy++) {
+                for(let dx=0; dx<obW; dx++) {
+                    if (rnd.nextFloat() < 0.8) { 
+                        const tx = ox + dx, ty = oy + dy;
+                        if (grid[ty] && grid[ty][tx] === 1) {
+                            backup.push({x: tx, y: ty});
+                            grid[ty][tx] = 0;
+                        }
+                    }
+                }
+            }
+
+            if (grid[daughter.y][daughter.x] === 0 || 
+                grid[startBottomY][startLeftX] === 0 || 
+                grid[startBottomY][startRightX] === 0) {
+                backup.forEach(b => grid[b.y][b.x] = 1);
+                continue;
+            }
+
+            if (!isPathValid()) {
+                backup.forEach(b => grid[b.y][b.x] = 1);
+            }
+        }
+    }
+}
+
+function getNextStepBFS(startX, startY, targetX, targetY) {
+    if(startX === targetX && startY === targetY) return null;
+    let queue = [{x: startX, y: startY}];
+    let cameFrom = new Map();
+    cameFrom.set(`${startX},${startY}`, null);
+    let found = false;
+    
+    let steps = 0;
+    while(queue.length > 0 && steps < 200) {
+        let curr = queue.shift();
+        if (curr.x === targetX && curr.y === targetY) { found = true; break; }
+        
+        let dirs = [...DIRS].sort(() => rnd.nextFloat() - 0.5);
+        for (let [dx, dy] of dirs) {
+            let nx = curr.x + dx, ny = curr.y + dy;
+            if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && grid[ny][nx] === 1) {
+                let key = `${nx},${ny}`;
+                if (!cameFrom.has(key) && !isBlockedForGoblin(nx, ny)) {
+                    cameFrom.set(key, {x: curr.x, y: curr.y});
+                    queue.push({x: nx, y: ny});
+                }
+            }
+        }
+        steps++;
+    }
+    
+    if (!found) return null;
+    
+    let curr = {x: targetX, y: targetY};
+    let prev = cameFrom.get(`${curr.x},${curr.y}`);
+    while(prev && (prev.x !== startX || prev.y !== startY)) {
+        curr = prev;
+        prev = cameFrom.get(`${curr.x},${curr.y}`);
+    }
+    return curr; 
+}
+
+function applySmoothing() {
+    for (let step = 0; step < 3; step++) {
+        let tempGrid = grid.map(row => [...row]);
+        for(let y = 1; y < GRID_H - 1; y++) {
+            for(let x = 1; x < GRID_W - 1; x++) {
+                if (y >= GRID_H - 10) continue;
+                let floors = 0;
+                for(let dy = -1; dy <= 1; dy++) {
+                    for(let dx = -1; dx <= 1; dx++) {
+                        if(dx === 0 && dy === 0) continue;
+                        if(grid[y+dy][x+dx] === 1) floors++;
+                    }
+                }
+                if (grid[y][x] === 0 && floors >= 5) tempGrid[y][x] = 1;
+                else if (grid[y][x] === 1 && floors <= 3) tempGrid[y][x] = 0;
+            }
+        }
+        let backup = grid.map(row => [...row]);
+        grid = tempGrid;
+        if (grid[daughter.y][daughter.x] === 0 || !isPathValid()) { grid = backup; break; }
+    }
+    
+    let tempGrid2 = grid.map(row => [...row]);
+    for(let y = 1; y < GRID_H - 1; y++) {
+        for(let x = 1; x < GRID_W - 1; x++) {
+            if (y >= GRID_H - 10) continue;
+            if (grid[y][x] === 1) {
+                let orthoFloors = 0;
+                if(grid[y-1][x] === 1) orthoFloors++;
+                if(grid[y+1][x] === 1) orthoFloors++;
+                if(grid[y][x-1] === 1) orthoFloors++;
+                if(grid[y][x+1] === 1) orthoFloors++;
+                if(orthoFloors <= 1) tempGrid2[y][x] = 0;
+            }
+        }
+    }
+    let backup2 = grid.map(row => [...row]);
+    grid = tempGrid2;
+    if (grid[daughter.y][daughter.x] === 0 || !isPathValid()) { grid = backup2; }
+}
+
+function placeBiscuitSafely() {
+    healingBiscuit.active = false;
+    let candidates = [
+        {dx:0, dy:1}, 
+        {dx:1, dy:0}, 
+        {dx:-1, dy:0} 
+    ];
+    for (let c of candidates) {
+        let bx = daughter.x + c.dx;
+        let by = daughter.y + c.dy;
+        if (by >= 0 && by < GRID_H && bx >= 0 && bx < GRID_W && grid[by][bx] === 1) {
+            healingBiscuit = {x: bx, y: by, active: true};
+            return;
+        }
+    }
+}
+
+function generateDungeon() {
+    grid = Array.from({length: GRID_H}, () => Array(GRID_W).fill(0));
+    floorVariant = Array.from({length: GRID_H}, () => Array(GRID_W).fill(0));
+    rooms = []; goblins = []; attackEffects = []; psychicArrays = []; floorDrawn = false;
+    minimapFloorDrawn = false; foundDaughterNotified = false;
+    p1LastHitTime = 0; p2LastHitTime = 0; 
+    player1.hitShakeTime = 0; player2.hitShakeTime = 0;
+    player1.stepCount = 0; player2.stepCount = 0;
+    bloodStains = []; 
+
+    currentStageColor = pickNextFloorColor();
+    currentStageBgm = pickStageBgms();
+
+    for(let y=0; y<GRID_H; y++) {
+        for(let x=0; x<GRID_W; x++) {
+            floorVariant[y][x] = Math.floor(rnd.nextFloat()*7)+1; 
+        }
+    }
+
+    const START_LENGTH = 6;
+    startLeftX = Math.floor(GRID_W / 2) - 1; startRightX = startLeftX + 1;
+    startBottomY = GRID_H - 1;
+    const startEntryY = GRID_H - START_LENGTH;
+    carveRect(startLeftX, startEntryY, 2, START_LENGTH);
+    player1.x = startLeftX; player1.y = GRID_H - 1; player1.facing = 1;
+    player2.x = startRightX; player2.y = GRID_H - 1; player2.facing = 1;
+
+    const firstRoomW = Math.floor(rnd.nextFloat() * 10) + 8; 
+    const firstRoomH = Math.floor(rnd.nextFloat() * 8) + 6; 
+    const firstRoomX = Math.floor(GRID_W / 2 - firstRoomW / 2);
+    const firstRoomY = Math.max(5, startEntryY - firstRoomH - 8 - Math.floor(rnd.nextFloat() * 15)); 
+    carveRect(firstRoomX, firstRoomY, firstRoomW, firstRoomH);
+    rooms.push({x: firstRoomX, y: firstRoomY, w: firstRoomW, h: firstRoomH});
+    carveCorridor(startLeftX, startEntryY - 1, 0, startEntryY - firstRoomY + 5, 3);
+
+    let branches = [{x: firstRoomX + Math.floor(firstRoomW / 2), y: firstRoomY, parentDir: 0}];
+    let roomCount = 1;
+    while (branches.length > 0 && roomCount < 20) {
+        const i = Math.floor(rnd.nextFloat() * branches.length); 
+        const branch = branches[i]; branches.splice(i, 1);
+        let possibleDirs = [0,1,2,3].filter(d => d !== (branch.parentDir + 2) % 4).sort(() => rnd.nextFloat() - 0.5); 
+        let added = 0;
+        for (const dir of possibleDirs) {
+            if (added >= 3) break; if (rnd.nextFloat() < 0.3) continue; 
+            const length = Math.floor(rnd.nextFloat() * 15) + 8; 
+            const endPos = carveCorridor(branch.x, branch.y, dir, length, Math.floor(rnd.nextFloat() * 4) + 2); 
+            const newW = Math.floor(rnd.nextFloat() * 12) + 7; 
+            const newH = Math.floor(rnd.nextFloat() * 10) + 5; 
+            const [dx, dy] = DIRS[dir];
+            let newX = endPos.x + dx - Math.floor(newW / 2);
+            let newY = endPos.y + dy - Math.floor(newH / 2);
+            newX = Math.max(3, Math.min(newX, GRID_W - newW - 3));
+            newY = Math.max(3, Math.min(newY, GRID_H - newH - 6));
+            if (newY + newH >= GRID_H - 5) continue;
+            carveRect(newX, newY, newW, newH);
+            rooms.push({x: newX, y: newY, w: newW, h: newH});
+            const attachY = dir === 0 ? newY + newH - 1 : dir === 2 ? newY : newY + Math.floor(newH / 2);
+            branches.push({x: newX + Math.floor(newW / 2), y: attachY, parentDir: dir});
+            added++; roomCount++;
+        }
+    }
+
+    placeDaughter();
+    addObstaclesToRooms();
+    applySmoothing();
+    
+    placeBiscuitSafely();
+
+    placeGoblins();
+    
+    shortestPathSteps = calculateShortestPath();
+
+    startTime = performance.now() / 1000;
+    fixedTime = 0; timerStopped = false; foundDaughter = false; foundDaughterNotified = false; gameCleared = false; isGameOver = false;
+    daughter.rescued = false; daughter.rescuer = null;
+    hpP1 = 10; hpP2 = 10;
+    document.getElementById('result-rank').style.display = 'none';
+    document.getElementById('restart-hint').innerText = ""; 
+    
+    updateInfoText();
+    playNormalBgm();
+}
+
+function carveRect(x, y, w, h) {
+    for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) {
+        const px = x + dx, py = y + dy;
+        if (px >= 0 && px < GRID_W && py >= 0 && py < GRID_H) grid[py][px] = 1;
+    }
+}
+
+function carveCorridor(startX, startY, dirIdx, length, width) {
+    const [dx, dy] = DIRS[dirIdx];
+    let x = startX, y = startY;
+    for (let i = 0; i < length; i++) {
+        const offset = Math.floor(width / 2);
+        for (let w = -offset; w <= offset; w++) {
+            const px = x + (dx === 0 ? w : 0), py = y + (dy === 0 ? w : 0);
+            if (px >= 0 && px < GRID_W && py >= 0 && py < GRID_H) grid[py][px] = 1;
+        }
+        x += dx; y += dy;
+    }
+    return {x: x - dx, y: y - dy};
+}
+
+function placeDaughter() {
+    const sortedRooms = [...rooms].sort((a, b) => a.y - b.y);
+    let targetRoom = sortedRooms.length >= 3 ? sortedRooms[Math.floor(rnd.nextFloat() * 2)] : sortedRooms[0]; 
+    let candidates = [];
+    for (let dy = 0; dy < targetRoom.h; dy++) for (let dx = 0; dx < targetRoom.w; dx++) {
+        const px = targetRoom.x + dx, py = targetRoom.y + dy;
+        if (grid[py][px] === 1) candidates.push({x: px, y: py});
+    }
+    const pos = candidates[Math.floor(rnd.nextFloat() * candidates.length)] || {x: targetRoom.x+1, y: targetRoom.y+1}; 
+    daughter.x = pos.x; daughter.y = pos.y;
+    distanceToDaughter = (GRID_H - 1) - daughter.y;
+}
+
+function placeGoblins() {
+    goblins = [];
+    let validTiles = [];
+    for (let y = 0; y < GRID_H; y++) for (let x = 0; x < GRID_W; x++) if (grid[y][x] === 1) validTiles.push({x, y});
+    validTiles = validTiles.filter(pos => 
+        pos.y < GRID_H - 10 && !(pos.x === daughter.x && pos.y === daughter.y)
+    );
+    
+    let goblinCount = isGreyMode ? 7 : Math.max(5, Math.min(Math.floor(validTiles.length * 0.1), 40));
+    
+    for(let i=0; i<goblinCount; i++) {
+        if(validTiles.length === 0) break;
+        const idx = Math.floor(rnd.nextFloat() * validTiles.length); 
+        const pos = validTiles[idx]; validTiles.splice(idx, 1);
+        
+        const isGiant = isGreyMode ? false : rnd.nextFloat() < 0.15; 
+        const sizeScale = isGreyMode ? 1.0 : (isGiant ? 1.15 : (0.85 + rnd.nextFloat() * 0.25)); 
+        const hp = isGreyMode ? 1 : (isGiant ? 4 : 3);
+
+        goblins.push({
+            x: pos.x, y: pos.y, hp: hp, maxHp: hp, facing: Math.floor(rnd.nextFloat() * 4), 
+            state: STATE.IDLE, lastTurnTime: performance.now(), lastMoveTime: 0, lastAttackTime: 0,
+            chargeStartTime: 0, reappearStartTime: 0,
+            isCasting: false, castEndTime: 0, 
+            rallyTarget: null, 
+            moveCooldown: IDLE_COOLDOWN, targetPlayer: null, nextUpdate: 0,
+            sizeScale: sizeScale, isGiant: isGiant,
+            bobOffset: rnd.nextFloat() * 100, 
+            deathTime: 0, deathDir: 0, deathAngle: 0, dissolveProgress: 0
+        });
+    }
+}
+
+function gameLoopStep() {
+    const now = performance.now();
+    goblins = goblins.filter(g => {
+        if (!g.nextUpdate || now >= g.nextUpdate) {
+            if (isGreyMode) updateGrey(g, now);
+            else updateGoblin(g, now);
+            g.nextUpdate = now + GOBLIN_UPDATE_INTERVAL;
+        }
+        return !(g.state === STATE.DYING && g.dissolveProgress >= 1.0);
+    });
+
+    if (isGreyMode) {
+        psychicArrays = psychicArrays.filter(a => {
+            const t = now - a.startTime;
+            if (t >= a.duration) {
+                [player1, player2].forEach(p => {
+                    if (Math.abs(p.x - a.x) <= 1 && Math.abs(p.y - a.y) <= 1) {
+                        hpP1 = 0; hpP2 = 0; 
+                        // 即ゲームオーバー
+                        if (!isDebugMode && !isGameOver && !gameCleared) {
+                            isGameOver = true; timerStopped = true;
+                            showResult();
+                        }
+                    }
+                });
+                return false; 
+            }
+            return true; 
+        });
+    }
+    
+    if (now - lastMinimapUpdate > MINIMAP_UPDATE_INTERVAL) {
+        updateMinimap();
+        lastMinimapUpdate = now;
+    }
+}
+
+function isAdjacent(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1; }
+
+function updateGoblin(g, now) {
+    if (g.state === STATE.DYING) {
+        const elapsed = now - g.deathTime;
+        const FADE_START_DELAY = 1500; 
+        const FADE_DURATION = 1000;    
+
+        if (elapsed < 500) {
+            g.deathAngle = (elapsed / 500) * (Math.PI / 2) * g.deathDir;
+        } else {
+            g.deathAngle = (Math.PI / 2) * g.deathDir;
+        }
+
+        if (elapsed >= FADE_START_DELAY) {
+            g.dissolveProgress = Math.min(1.0, (elapsed - FADE_START_DELAY) / FADE_DURATION);
+        } else {
+            g.dissolveProgress = 0;
+        }
+        return; 
+    }
+
+    if (g.hp <= 0) return; 
+    const canMove = now - g.lastMoveTime >= g.moveCooldown;
+
+    if (g.state === STATE.RAGE) {
+        g.targetPlayer = daughter.rescuer === 'p1' ? player1 : player2;
+        moveGoblinToward(g, g.targetPlayer.x, g.targetPlayer.y);
+        if (isAdjacent(g, g.targetPlayer)) tryGoblinAttack(g, g.targetPlayer, now);
+        g.lastMoveTime = now; return;
+    }
+    if (g.state === STATE.LOCK) {
+        if (isAdjacent(g, g.targetPlayer)) tryGoblinAttack(g, g.targetPlayer, now);
+        else setGoblinState(g, STATE.ALERT, now);
+        g.lastMoveTime = now; return;
+    }
+    
+    // --- ★修正: 視界チェックの平等化 ---
+    let sensed = [];
+    // P1, P2の両方をチェックし、距離順でソートして一番近いものを狙う
+    [player1, player2].forEach(p => {
+        const dist = Math.hypot(g.x - p.x, g.y - p.y);
+        const los = hasLineOfSight(g.x, g.y, p.x, p.y);
+        if (dist <= SMELL_RADIUS || (dist <= SIGHT_RADIUS && los)) {
+            sensed.push({p: p, d: dist});
+        }
+    });
+    // 最も近いプレイヤーをターゲット候補にする
+    const sensedPlayer = sensed.length > 0 ? sensed.sort((a,b)=>a.d-b.d)[0].p : null;
+
+    if (g.state === STATE.ALERT) {
+        g.targetPlayer = g.targetPlayer || sensedPlayer; // ターゲットがいれば維持、いなければ新規
+        if (!g.targetPlayer) { setGoblinState(g, STATE.IDLE, now); return; }
+        if (isAdjacent(g, g.targetPlayer)) { setGoblinState(g, STATE.LOCK, now); return; }
+        if (canMove) {
+            preprocessGoblinMovement(g, g.targetPlayer);
+            moveGoblinToward(g, g.targetPlayer.x, g.targetPlayer.y);
+            g.lastMoveTime = now;
+        }
+    } else if (sensedPlayer) { 
+        setGoblinState(g, STATE.ALERT, now); g.targetPlayer = sensedPlayer;
+    } else if (g.state === STATE.IDLE && canMove) { 
+        const dirs = DIRS.map((d, i) => ({d, i})).sort(() => rnd.nextFloat() - 0.5); 
+        for (const {d: [dx, dy], i} of dirs) {
+            const nx = g.x + dx, ny = g.y + dy;
+            if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && grid[ny][nx] === 1 && !isBlockedForGoblin(nx, ny)) {
+                g.x = nx; g.y = ny; g.facing = i; g.lastMoveTime = now; break;
+            }
+        }
+    }
+    
+    const isSearching = g.state === STATE.IDLE || g.state === STATE.ALERT;
+    if (isSearching && !canMove) {
+        let targetsInSight = [];
+        let pList = [player1, player2];
+        
+        for(let p of pList) {
+            if(hpP1 <= 0 && p === player1) continue;
+            if(hpP2 <= 0 && p === player2) continue;
+
+            const dx = p.x - g.x;
+            const dy = p.y - g.y;
+            let inCone = false;
+            
+            if (g.facing === 0) { 
+                if (Math.abs(dx) <= 1 && dy >= -3 && dy < 0) inCone = true;
+            } else if (g.facing === 1) { 
+                if (dx >= 1 && dx <= 3 && Math.abs(dy) <= 1) inCone = true;
+            } else if (g.facing === 2) { 
+                if (Math.abs(dx) <= 1 && dy >= 1 && dy <= 3) inCone = true;
+            } else if (g.facing === 3) { 
+                if (dx >= -3 && dx <= -1 && Math.abs(dy) <= 1) inCone = true;
+            }
+            if (inCone) targetsInSight.push({p:p, d: Math.abs(dx)+Math.abs(dy)});
+        }
+
+        // 視界内に誰かいた場合、一番近い人の方を向く（あるいは気づく）
+        if (targetsInSight.length > 0) {
+            g.lastTurnTime = now;
+            // 実際に見つけたらALERTにする処理は上のsensedPlayerで行われているため、ここでは振り向く頻度制御のみ
+        } else if (now - g.lastTurnTime > GOBLIN_LOOK_INTERVAL) {
+            g.facing = Math.floor(rnd.nextFloat() * 4); g.lastTurnTime = now; 
+        }
+    }
+}
+
+function updateGrey(g, now) {
+    if (g.state === STATE.DYING) {
+        const elapsed = now - g.deathTime;
+        const DISSOLVE_DURATION = 1000; 
+
+        if (elapsed < DISSOLVE_DURATION) {
+            g.dissolveProgress = elapsed / DISSOLVE_DURATION;
+        } else {
+            g.dissolveProgress = 1.0;
+        }
+        return;
+    }
+
+    if (g.hp <= 0) return;
+    
+    if (g.isCasting && now >= g.castEndTime) {
+        g.isCasting = false;
+        if (g.targetPlayer) {
+            const distToTarget = Math.abs(g.x - g.targetPlayer.x) + Math.abs(g.y - g.targetPlayer.y);
+            if (distToTarget <= 2 && g.state !== STATE.CHARGE && g.state !== STATE.REAPPEAR) {
+                g.state = STATE.CHARGE;
+                g.chargeStartTime = now;
+                return;
+            }
+        }
+    }
+
+    let sensed = [];
+    [player1, player2].forEach(p => {
+        const dist = Math.hypot(g.x - p.x, g.y - p.y);
+        if (dist <= 6) sensed.push({p: p, d: dist});
+    });
+    const sensedPlayer = sensed.length > 0 ? sensed.sort((a,b)=>a.d-b.d)[0].p : null;
+
+    let nearestAlly = null;
+    let minDistToAlly = Infinity;
+    goblins.forEach(other => {
+        if (other !== g && other.hp > 0) {
+            const d = Math.abs(g.x - other.x) + Math.abs(g.y - other.y);
+            if (d < minDistToAlly) { minDistToAlly = d; nearestAlly = other; }
+        }
+    });
+
+    if (g.state === STATE.REAPPEAR) {
+        if (now - g.reappearStartTime >= 1000) {
+            g.state = STATE.ALERT;
+            g.lastMoveTime = now;
+            if (nearestAlly) {
+                nearestAlly.rallyTarget = {x: g.x, y: g.y};
+                g.rallyTarget = {x: nearestAlly.x, y: nearestAlly.y};
+                if (nearestAlly.state === STATE.IDLE) nearestAlly.state = STATE.ALERT;
+            }
+        }
+        return; 
+    }
+
+    if (g.state === STATE.CHARGE) {
+        if (now - g.chargeStartTime >= 1000) {
+            let validTiles = [];
+            for(let y=Math.max(0, g.y-5); y<=Math.min(GRID_H-1, g.y+5); y++) {
+                for(let x=Math.max(0, g.x-5); x<=Math.min(GRID_W-1, g.x+5); x++) {
+                    if (grid[y][x] === 1 && !isBlockedForGoblin(x, y)) {
+                        const dToPlayer = g.targetPlayer ? Math.abs(x - g.targetPlayer.x) + Math.abs(y - g.targetPlayer.y) : 3;
+                        if (dToPlayer >= 2 && dToPlayer <= 5) validTiles.push({x, y});
+                    }
+                }
+            }
+            if (validTiles.length > 0) {
+                if (nearestAlly) {
+                    validTiles.sort((a, b) => {
+                        let da = Math.abs(a.x - nearestAlly.x) + Math.abs(a.y - nearestAlly.y);
+                        let db = Math.abs(b.x - nearestAlly.x) + Math.abs(b.y - nearestAlly.y);
+                        return da - db;
+                    });
+                    const topTiles = validTiles.slice(0, Math.min(3, validTiles.length));
+                    const t = topTiles[Math.floor(rnd.nextFloat() * topTiles.length)]; 
+                    g.x = t.x; g.y = t.y;
+                } else {
+                    const t = validTiles[Math.floor(rnd.nextFloat() * validTiles.length)]; 
+                    g.x = t.x; g.y = t.y;
+                }
+            }
+            g.state = STATE.REAPPEAR;
+            g.reappearStartTime = now;
+        }
+        return;
+    }
+
+    if (g.state === STATE.ALERT) {
+        g.targetPlayer = g.targetPlayer || sensedPlayer;
+        if (!g.targetPlayer) { g.state = STATE.IDLE; return; }
+
+        const distToTarget = Math.abs(g.x - g.targetPlayer.x) + Math.abs(g.y - g.targetPlayer.y);
+        
+        if (distToTarget <= 2 && !g.isCasting && g.state !== STATE.CHARGE && g.state !== STATE.REAPPEAR) {
+            g.state = STATE.CHARGE;
+            g.chargeStartTime = now;
+            return;
+        }
+
+        if (now - g.lastAttackTime > GREY_ARRAY_COOLDOWN && !g.isCasting) {
+            let ally = goblins.find(other => other !== g && other.hp > 0 && other.state === STATE.ALERT && Math.hypot(g.x - other.x, g.y - other.y) <= 5 && !other.isCasting);
+            if (ally) {
+                psychicArrays.push({
+                    x: g.targetPlayer.x, y: g.targetPlayer.y,
+                    startTime: now, duration: 2000, targetPlayer: g.targetPlayer
+                });
+                g.lastAttackTime = now;
+                ally.lastAttackTime = now;
+                g.isCasting = true;
+                g.castEndTime = now + 2000;
+                ally.isCasting = true;
+                ally.castEndTime = now + 2000;
+            }
+        }
+
+        if (now - g.lastMoveTime >= g.moveCooldown) {
+            let moved = false;
+            
+            if (g.rallyTarget) {
+                const distToRally = Math.abs(g.x - g.rallyTarget.x) + Math.abs(g.y - g.rallyTarget.y);
+                if (distToRally <= 1) {
+                    g.rallyTarget = null; 
+                } else {
+                    let step = getNextStepBFS(g.x, g.y, g.rallyTarget.x, g.rallyTarget.y);
+                    if (step) {
+                        let safe = true;
+                        if (g.targetPlayer) {
+                            const dToP = Math.abs(step.x - g.targetPlayer.x) + Math.abs(step.y - g.targetPlayer.y);
+                            if (dToP <= 1) safe = false;
+                        }
+                        if (safe) {
+                            if (step.x > g.x) g.facing = 1; else if (step.x < g.x) g.facing = 3;
+                            else if (step.y > g.y) g.facing = 2; else g.facing = 0;
+                            g.x = step.x; g.y = step.y;
+                            moved = true;
+                        } else {
+                            g.rallyTarget = null;
+                        }
+                    } else {
+                        g.rallyTarget = null; 
+                    }
+                }
+            }
+
+            if (!moved) {
+                let bestDir = -1, bestScore = -Infinity;
+                DIRS.forEach(([dx, dy], i) => {
+                    const nx = g.x + dx, ny = g.y + dy;
+                    if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && grid[ny][nx]===1 && !isBlockedForGoblin(nx, ny)) {
+                        const dToPlayer = Math.abs(nx - g.targetPlayer.x) + Math.abs(ny - g.targetPlayer.y);
+                        let score = 0;
+                        if (dToPlayer === 2) score = 20;
+                        else if (dToPlayer === 3) score = 10;
+                        else if (dToPlayer > 3) score = -dToPlayer * 2; 
+                        else score = -100; 
+                        
+                        if (nearestAlly) {
+                            const dToAlly = Math.abs(nx - nearestAlly.x) + Math.abs(ny - nearestAlly.y);
+                            score -= dToAlly * 1.5; 
+                        }
+                        
+                        if (score > bestScore) { bestScore = score; bestDir = i; }
+                    }
+                });
+                if (bestDir !== -1) {
+                    g.x += DIRS[bestDir][0]; g.y += DIRS[bestDir][1]; g.facing = bestDir;
+                }
+            }
+            g.lastMoveTime = now;
+        }
+    } else if (sensedPlayer) {
+        g.state = STATE.ALERT; g.targetPlayer = sensedPlayer;
+        g.moveCooldown = CHASE_COOLDOWN;
+        if (nearestAlly && nearestAlly.state === STATE.IDLE) {
+            nearestAlly.state = STATE.ALERT;
+            nearestAlly.targetPlayer = sensedPlayer;
+        }
+    } else if (g.state === STATE.IDLE && now - g.lastMoveTime >= g.moveCooldown) {
+        let moved = false;
+        if (g.rallyTarget) {
+            const distToRally = Math.abs(g.x - g.rallyTarget.x) + Math.abs(g.y - g.rallyTarget.y);
+            if (distToRally <= 1) {
+                g.rallyTarget = null;
+            } else {
+                let step = getNextStepBFS(g.x, g.y, g.rallyTarget.x, g.rallyTarget.y);
+                if (step) {
+                    if (step.x > g.x) g.facing = 1; else if (step.x < g.x) g.facing = 3;
+                    else if (step.y > g.y) g.facing = 2; else g.facing = 0;
+                    g.x = step.x; g.y = step.y;
+                    moved = true;
+                } else {
+                    g.rallyTarget = null;
+                }
+            }
+        }
+        
+        if (!moved && nearestAlly) {
+            const distToAlly = Math.abs(g.x - nearestAlly.x) + Math.abs(g.y - nearestAlly.y);
+            if (distToAlly > 3) {
+                let step = getNextStepBFS(g.x, g.y, nearestAlly.x, nearestAlly.y);
+                if (step) {
+                    if (step.x > g.x) g.facing = 1; else if (step.x < g.x) g.facing = 3;
+                    else if (step.y > g.y) g.facing = 2; else g.facing = 0;
+                    g.x = step.x; g.y = step.y;
+                    moved = true;
+                }
+            }
+        }
+        
+        if (!moved) {
+            const dirs = DIRS.map((d, i) => ({d, i})).sort(() => rnd.nextFloat() - 0.5); 
+            for (const {d: [dx, dy], i} of dirs) {
+                const nx = g.x + dx, ny = g.y + dy;
+                if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && grid[ny][nx] === 1 && !isBlockedForGoblin(nx, ny)) {
+                    g.x = nx; g.y = ny; g.facing = i; break;
+                }
+            }
+        }
+        g.lastMoveTime = now;
+    }
+} // --- updateGrey終了 ---
+
+function setGoblinState(g, newState, now) {
+    if (g.state === newState) return;
+    g.state = newState; g.lastMoveTime = now;
+    if(newState === STATE.IDLE) g.moveCooldown = IDLE_COOLDOWN;
+    else if(newState === STATE.ALERT) g.moveCooldown = CHASE_COOLDOWN;
+    else if(newState === STATE.LOCK) g.moveCooldown = GOBLIN_ATTACK_INTERVAL;
+    else if(newState === STATE.RAGE) g.moveCooldown = RAGE_COOLDOWN;
+} // --- setGoblinState終了 ---
+
+function moveGoblinToward(g, tx, ty) {
+    let bestDir = -1, bestDist = Infinity;
+    DIRS.forEach(([dx, dy], i) => {
+        const nx = g.x + dx, ny = g.y + dy;
+        if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && grid[ny][nx]===1 && !isBlockedForGoblin(nx, ny)) {
+            const d = Math.hypot(nx - tx, ny - ty);
+            if (d < bestDist) { bestDist = d; bestDir = i; }
+        }
+    });
+    if (bestDir !== -1) {
+        g.x += DIRS[bestDir][0]; g.y += DIRS[bestDir][1]; g.facing = bestDir;
+    }
+} // --- moveGoblinToward終了 ---
+
+function hasLineOfSight(x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const steps = Math.max(Math.abs(dx), Math.abs(dy));
+    if(steps===0) return true;
+    for(let i=1; i<steps; i++) {
+        const x = Math.floor(x1 + dx*i/steps + 0.5), y = Math.floor(y1 + dy*i/steps + 0.5);
+        if(grid[y]?.[x]===0) return false;
+    }
+    return true;
+} // --- hasLineOfSight終了 ---
+
+function isBlockedForGoblin(nx, ny) {
+    if (goblins.some(g => g.hp>0 && g.x === nx && g.y === ny)) return true;
+    if (player1.x === nx && player1.y === ny) return true;
+    if (player2.x === nx && player2.y === ny) return true;
+    return false;
+} // --- isBlockedForGoblin終了 ---
+
+function isBlockedForPlayer(nx, ny) {
+    if (goblins.some(g => g.hp>0 && g.x === nx && g.y === ny)) return true;
+    return false;
+} // --- isBlockedForPlayer終了 ---
+
+function preprocessGoblinMovement(g, tp) {
+    if(!tp) return;
+    const dx = tp.x - g.x, dy = tp.y - g.y;
+    if (Math.abs(dx)===1 && Math.abs(dy)===1) { 
+        const c1 = {x: g.x+dx, y: g.y}, c2 = {x: g.x, y: g.y+dy};
+        const candidates = [c1, c2].filter(c => grid[c.y][c.x]===1 && !isBlockedForGoblin(c.x, c.y));
+        if (candidates.length > 0) {
+            const c = candidates[Math.floor(rnd.nextFloat()*candidates.length)]; 
+            g.x = c.x; g.y = c.y; 
+            if (c.x !== g.x) g.facing = (c.x > g.x ? 1 : 3);
+            else g.facing = (c.y > g.y ? 2 : 0);
+        }
+    }
+} // --- preprocessGoblinMovement終了 ---
+
+function tryGoblinAttack(g, target, now) {
+    if (now - g.lastAttackTime < GOBLIN_ATTACK_INTERVAL) return;
+    g.lastAttackTime = now;
+    
+    if(target.x > g.x) g.facing = 1; else if(target.x < g.x) g.facing = 3;
+    else if(target.y > g.y) g.facing = 2; else g.facing = 0;
+
+    const pitch = g.isGiant ? 0.4 : 1.0;
+    const vol = g.isGiant ? 0.7 * 1.2 : 0.7;
+    playSE(SE.goblinAttack, vol, 0.15, pitch);
+
+    damagePlayer(target, 1); 
+
+    if (conn && conn.open) {
+        conn.send({
+            type: 'SPAWN_EFFECT',
+            x: target.x + (target.x - g.x)*0.1, y: target.y + (target.y - g.y)*0.1,
+            kind: 'goblin', dir: g.facing
+        });
+    }
+    attackEffects.push({
+        x: target.x + (target.x - g.x)*0.1, y: target.y + (target.y - g.y)*0.1,
+        type: 'goblin', dir: g.facing, startTime: performance.now(), duration: 120, shakeX:0, shakeY:0
+    });
+} // --- tryGoblinAttack終了 ---
+
+function damagePlayer(p, amount) {
+    const now = performance.now();
+    const lastHit = p === player1 ? p1LastHitTime : p2LastHitTime;
+    if (now - lastHit < IFRAME_DURATION) return;
+    
+    if (p === player1) { hpP1 = Math.max(0, hpP1 - amount); p1LastHitTime = now; }
+    else { hpP2 = Math.max(0, hpP2 - amount); p2LastHitTime = now; }
+    
+    p.hitShakeTime = now;
+    playSE(p===player1 ? SE.playerHit1 : SE.playerHit2, 0.9, 0.05);
+
+    if (hpP1 <= 0 || hpP2 <= 0) {
+        if (!isDebugMode && !isGameOver && !gameCleared) {
+            isGameOver = true; timerStopped = true;
+            showResult();
+        }
+    }
+} // --- damagePlayer終了 ---
+
+function movePlayer(p, dx, dy) {
+    if (dx === 0 && dy === -1) p.facing = 0;
+    if (dx === 1 && dy === 0) p.facing = 1;
+    if (dx === 0 && dy === 1) p.facing = 2;
+    if (dx === -1 && dy === 0) p.facing = 3;
+
+    const nx = p.x + dx, ny = p.y + dy;
+    const other = p === player1 ? player2 : player1;
+    
+    if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && grid[ny][nx] === 1 && 
+        !isBlockedForPlayer(nx, ny) && !(nx === other.x && ny === other.y)) {
+        p.x = nx; p.y = ny;
+        p.stepCount++; 
+
+        if (healingBiscuit.active && nx === healingBiscuit.x && ny === healingBiscuit.y) {
+            healingBiscuit.active = false;
+            if (p === player1) hpP1 = 10; else hpP2 = 10;
+            playElectronicBlip();
+        }
+
+        if (!foundDaughter && nx === daughter.x && ny === daughter.y) {
+            foundDaughter = true; daughter.rescued = true; daughter.rescuer = p === player1 ? 'p1' : 'p2';
+            fixedTime = performance.now() / 1000 - startTime; timerStopped = true;
+            goblins.forEach(g => { if(g.hp>0 && !isGreyMode) setGoblinState(g, STATE.RAGE, performance.now()); });
+            enterRageBgm(); updateInfoText();
+        }
+        if (daughter.rescued && daughter.rescuer === (p === player1 ? 'p1' : 'p2')) {
+            daughter.x = p.x; daughter.y = p.y;
+        }
+        checkClear();
+    }
+} // --- movePlayer終了 ---
+
+function playerAttack(p) {
+    // --- ★再確認: 娘を担いでいる場合は攻撃不可 ---
+    if (!isDebugMode && daughter.rescued && daughter.rescuer === (p === player1 ? 'p1' : 'p2')) return;
+
+    const now = performance.now();
+    const lastAtk = p === player1 ? lastAttackTimeP1 : lastAttackTimeP2;
+    if (now/1000 - lastAtk < ATTACK_COOLDOWN) return;
+    if (p === player1) lastAttackTimeP1 = now/1000; else lastAttackTimeP2 = now/1000;
+
+    const [dx, dy] = DIRS[p.facing];
+    const tx = p.x + dx, ty = p.y + dy;
+    let hit = false;
+    
+    goblins.forEach(g => {
+        if (g.hp > 0 && g.x === tx && g.y === ty) {
+            if (isGreyMode && (g.state === STATE.CHARGE || g.state === STATE.REAPPEAR)) return;
+            
+            g.hp -= 3; hit = true;
+            if (!isGreyMode) {
+                const pitch = g.isGiant ? 0.4 : 1.0;
+                const vol = g.isGiant ? 0.8 * 1.2 : 0.8;
+                playSE(SE.goblinHit, vol, 0.1, pitch);
+            }
+            if (g.hp <= 0) { 
+                g.state = STATE.DYING;
+                g.targetPlayer = null;
+                g.deathTime = now;
+                g.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1; 
+            }
+        }
+    });
+    const other = p === player1 ? player2 : player1;
+    if ((p===player1?hpP2>0:hpP1>0) && other.x === tx && other.y === ty) { damagePlayer(other, 3); hit = true; }
+
+    playSE(p===player1 ? SE.playerAttack1 : SE.playerAttack2, hit?0.8:0.5, 0.05);
+    
+    const ex = tx + 0.5 + (rnd.nextFloat()-0.5)*0.2;
+    const ey = ty + 0.5 + (rnd.nextFloat()-0.5)*0.2;
+    
+    if (isHost && conn && conn.open) {
+        conn.send({
+            type: 'SPAWN_EFFECT',
+            x: ex, y: ey,
+            kind: 'player', owner: p===player1?'p1':'p2', dir: p.facing
+        });
+    }
+    attackEffects.push({
+        x: ex, y: ey,
+        type: 'player', owner: p===player1?'p1':'p2', dir: p.facing, startTime: performance.now(), duration: 100
+    });
+} // --- playerAttack終了 ---
+
+function checkClear() {
+    const isP1Home = player1.y === startBottomY && (player1.x === startLeftX || player1.x === startRightX);
+    const isP2Home = player2.y === startBottomY && (player2.x === startLeftX || player2.x === startRightX);
+    
+    if (foundDaughter && daughter.rescued && isP1Home && isP2Home && (!isGameOver || isDebugMode)) {
+        gameCleared = true; stopCurrentBgm();
+        if (!isGreyMode) {
+            clearBGM.currentTime = 0;
+            clearBGM.loop = true; 
+            clearBGM.play().catch(()=>{});
+        }
+        showResult();
+    }
+} // --- checkClear終了 ---
+
+function showResult() {
+    const rankEl = document.getElementById('result-rank');
+    rankEl.style.display = 'block';
+    
+    const restartHint = document.getElementById('restart-hint');
+    if (isDebugMode) {
+         restartHint.innerHTML = "(R: 次のダンジョン)";
+    } else {
+        if (gameCleared) {
+            restartHint.innerHTML = "(R: 続行 / W: 帰還)";
+        } else {
+            restartHint.innerHTML = "(R: 再起 / W: 撤退)";
+        }
+    }
+
+    if ((hpP1 <= 0 || hpP2 <= 0) && !gameCleared) {
+        document.getElementById('rank-grade').innerText = isGreyMode ? "Abducted" : "Game Over";
+        document.getElementById('guild-comment').innerText = isGreyMode ? "生体サンプルの回収完了" : "死...";
+        document.getElementById('rank-time').innerText = "";
+        return;
+    }
+
+    const sBase = shortestPathSteps * 1.1; 
+    const maxTime = (sBase * 2.8) + 1.0;
+    
+    const units = (fixedTime / maxTime) * 61;
+    
+    let rank = "C", comment = "ハラミブクロ";
+
+    if (units <= 20) {
+        rank = "S"; 
+        comment = isGreyMode ? "未知との遭遇者" : "乙女の奇跡";
+    } else if (units <= 40) {
+        rank = "A"; 
+        comment = isGreyMode ? "La Sonnambula" : "ふつうのむらむすめ";
+    } else if (units <= 60) {
+        rank = "B"; 
+        comment = isGreyMode ? "アブダクティ" : "証聖者";
+    } else {
+        rank = "C"; 
+        comment = isGreyMode ? "Starwomb maiden" : "ハラミブクロ";
+    }
+    
+    document.getElementById('rank-grade').innerText = rank;
+    document.getElementById('guild-comment').innerText = comment;
+    document.getElementById('rank-time').innerText = `Time: ${fixedTime.toFixed(2)}s`;
+} // --- showResult終了 ---
+
+function drawGameScreen() {
+    if (isGreyMode) {
+        const hueShift = Math.sin(performance.now() / 1000) * 15;
+        canvas.style.filter = `saturate(1.2) hue-rotate(${hueShift}deg) contrast(1.1)`;
+    } else {
+        canvas.style.filter = 'none';
+    }
+
+    ctx.fillStyle = "#111"; ctx.fillRect(0,0,VIRTUAL_WIDTH,VIRTUAL_HEIGHT);
+    
+    const now = performance.now();
+    
+    let targetPlayer = player1;
+    if (!isHost && !isDebugMode) {
+        targetPlayer = player2; 
+    }
+    
+    let vx = targetPlayer.x - VIEW_TILES_X/2;
+    let vy = targetPlayer.y - VIEW_TILES_Y/2;
+    vx = Math.max(0, Math.min(vx, GRID_W - VIEW_TILES_X));
+    vy = Math.max(0, Math.min(vy, GRID_H - VIEW_TILES_Y));
+
+    if(!floorDrawn) renderFloorCanvas();
+    ctx.save();
+    
+    ctx.translate(GAME_OFFSET_X, GAME_OFFSET_Y);
+    
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(floorCanvas, vx*SCALED_TILE, vy*SCALED_TILE, DARKNESS_WIDTH, DARKNESS_HEIGHT, 0, 0, DARKNESS_WIDTH, DARKNESS_HEIGHT);
+    
+    const drawSprite = (img, gx, gy, scaleX=1, scaleY=1, offsetY=0, filter='', rotation=0, originY=0) => {
+        if (gx < vx || gx >= vx+VIEW_TILES_X || gy < vy || gy >= vy+VIEW_TILES_Y) return;
+        const dx = (gx - vx) * SCALED_TILE;
+        const dy = (gy - vy) * SCALED_TILE;
+        const dw = SCALED_TILE * Math.abs(scaleX);
+        const dh = SCALED_TILE * scaleY;
+        const drawX = dx + (SCALED_TILE - dw)/2;
+        const drawY = dy + SCALED_TILE - dh + offsetY;
+        
+        ctx.save();
+        ctx.translate(drawX + dw/2, drawY + dh - originY);
+        ctx.rotate(rotation);
+        ctx.translate(-(drawX + dw/2), -(drawY + dh - originY));
+        
+        if(filter) ctx.filter = filter;
+        if(scaleX < 0) {
+             ctx.translate(drawX + dw, drawY); ctx.scale(-1, 1); ctx.drawImage(img, 0, 0, dw, dh);
+        } else {
+             ctx.drawImage(img, drawX, drawY, dw, dh);
+        }
+        ctx.restore();
+    };
+
+    if (healingBiscuit.active) {
+        drawSprite(biscuitImg, healingBiscuit.x, healingBiscuit.y, 0.2, 0.2, 0, "drop-shadow(0 0 4px #ffff00)");
+    }
+
+    if (isGreyMode && greyCircleImg.complete) {
+        psychicArrays.forEach(a => {
+            const t = now - a.startTime;
+            if (t <= a.duration) {
+                const ratio = t / a.duration; 
+                const curSize = SCALED_TILE + (SCALED_TILE * 2 * ratio); 
+                const dx = (a.x - vx) * SCALED_TILE + SCALED_TILE/2;
+                const dy = (a.y - vy) * SCALED_TILE + SCALED_TILE/2;
+                
+                ctx.save();
+                ctx.globalCompositeOperation = 'screen';
+                ctx.translate(dx, dy);
+                ctx.globalAlpha = 1.0 - (ratio * 0.3);
+                ctx.drawImage(greyCircleImg, -curSize/2, -curSize/2, curSize, curSize);
+                ctx.restore();
+            }
+        });
+    }
+
+    goblins.forEach(g => {
+        if(g.hp <= 0 && g.state !== STATE.DYING) return; 
+        
+        if (isGreyMode) {
+            let currentScale = g.sizeScale;
+            
+            if (g.state === STATE.DYING) {
+                currentScale = g.sizeScale * (1.0 - g.dissolveProgress);
+                const filterStr = `brightness(0)`; 
+                const floatOffset = -(SCALED_TILE * g.sizeScale * 0.5 * g.dissolveProgress);
+                drawSprite(greyImg, g.x, g.y, currentScale, currentScale, floatOffset, filterStr);
+                return;
+            }
+
+            if (g.state === STATE.CHARGE) {
+                const elapsed = now - g.chargeStartTime;
+                const progress = Math.min(elapsed / 1000, 1.0);
+                currentScale = Math.max(0.01, g.sizeScale * (1.0 - progress));
+            } else if (g.state === STATE.REAPPEAR) {
+                const elapsed = now - g.reappearStartTime;
+                const progress = Math.min(elapsed / 1000, 1.0);
+                currentScale = Math.max(0.01, g.sizeScale * progress);
+            }
+            
+            let filterStr = '';
+            if (g.isCasting) {
+                const glow = Math.abs(Math.sin(now / 150)); 
+                filterStr = `drop-shadow(0 0 ${10 * glow}px #ffff00) brightness(${1 + glow})`;
+            }
+            drawSprite(greyImg, g.x, g.y, currentScale, currentScale, 0, filterStr); 
+        } else {
+            const bob = Math.abs(Math.sin((now + g.bobOffset) / 150)) * 5; 
+            let img = goblinImages.front;
+            let scaleX = g.sizeScale; 
+            if(g.facing === 0) img = goblinImages.back;
+            else if(g.facing === 1) img = goblinImages.side; 
+            else if(g.facing === 3) { img = goblinImages.side; scaleX *= -1; }
+            
+            let filter = g.isGiant ? 'sepia(0.5) hue-rotate(-30deg) brightness(0.9) contrast(0.8)' : '';
+            
+            let rotation = 0;
+            
+            if (g.state === STATE.DYING) {
+                filter = 'brightness(0.6) sepia(0.4) saturate(0.3)';
+                rotation = g.deathAngle;
+                ctx.save();
+                ctx.globalAlpha = 1.0 - g.dissolveProgress; 
+            }
+
+            drawSprite(img, g.x, g.y, scaleX, g.sizeScale, -bob, filter, rotation, 5);
+
+            if (g.state === STATE.DYING) {
+                ctx.restore(); 
+            }
+        }
+    });
+
+    if(!daughter.rescued) drawSprite(daughterImg, daughter.x, daughter.y);
+
+    [player1, player2].forEach(p => {
+        const isP2 = p === player2;
+        const isDead = isP2 ? hpP2 <= 0 : hpP1 <= 0;
+        const shake = (now - p.hitShakeTime < HIT_SHAKE_DURATION) ? (rnd.nextFloat()*6-3) : 0; 
+        
+        let img = playerImages.front;
+        let sx = 1;
+        
+        if (p.facing === 0) { 
+            img = playerImages.back; if (p.stepCount % 2 !== 0) sx = -1;
+        }
+        else if (p.facing === 2) { 
+            img = playerImages.front; if (p.stepCount % 2 !== 0) sx = -1;
+        }
+        else if (p.facing === 1) { 
+            img = (p.stepCount % 2 === 0) ? playerImages.right1 : playerImages.right2; 
+        }
+        else if (p.facing === 3) { 
+            img = (p.stepCount % 2 === 0) ? playerImages.right1 : playerImages.right2; sx = -1;
+        }
+        
+        if (daughter.rescued && daughter.rescuer === (isP2?'p2':'p1') && !isDead) {
+            drawSprite(daughterImg, p.x, p.y, 0.7, 0.7, -30 + shake);
+        }
+        
+        const filterStr = isDead ? 'brightness(0.3) sepia(1) hue-rotate(-50deg)' : (isP2 ? 'hue-rotate(120deg)' : '');
+        drawSprite(img, p.x, p.y, sx, 1, shake, filterStr);
+
+        if (p.x >= vx && p.x < vx+VIEW_TILES_X && p.y >= vy && p.y < vy+VIEW_TILES_Y) {
+            const playerName = isP2 ? p2Name : p1Name; 
+            if (playerName) {
+                ctx.save();
+                const nameDx = (p.x - vx) * SCALED_TILE + SCALED_TILE/2;
+                const nameDy = (p.y - vy) * SCALED_TILE - 15 + shake;
+                ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+                
+                ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+                ctx.strokeStyle = "rgba(0, 0, 0, 0.7)"; ctx.lineWidth = 2;
+                
+                const maxWidth = SCALED_TILE * 3;
+                const fontSize = 20;
+                ctx.font = `${fontSize}px 'DotGothic16'`;
+                const textWidth = ctx.measureText(playerName).width;
+                
+                let scaleFactor = 1;
+                if (textWidth > maxWidth) {
+                    scaleFactor = maxWidth / textWidth;
+                }
+                
+                ctx.translate(nameDx, nameDy);
+                ctx.scale(scaleFactor, 1);
+                ctx.strokeText(playerName, 0, 0);
+                ctx.fillText(playerName, 0, 0);
+                
+                ctx.restore();
+            }
+        }
+    });
+
+    darknessCtx.globalCompositeOperation = 'source-over';
+    darknessCtx.fillStyle = '#000'; darknessCtx.fillRect(0,0,DARKNESS_WIDTH,DARKNESS_HEIGHT);
+    
+    const drawVision = (p) => {
+        if(p.x>=vx && p.x<vx+VIEW_TILES_X && p.y>=vy && p.y<vy+VIEW_TILES_Y){
+            const cx = (p.x-vx)*SCALED_TILE + SCALED_TILE/2;
+            const cy = (p.y-vy)*SCALED_TILE + SCALED_TILE/2;
+            
+            darknessCtx.globalCompositeOperation = 'destination-out';
+            darknessCtx.drawImage(visionHoleCanvas, cx - visionRadius, cy - visionRadius);
+
+            if (isGreyMode) {
+                darknessCtx.globalCompositeOperation = 'source-over';
+                darknessCtx.drawImage(dreamyGlowCanvas, cx - visionRadius, cy - visionRadius);
+                darknessCtx.globalCompositeOperation = 'destination-out'; 
+            }
+        }
+    }; 
+    
+    drawVision(player1);
+    drawVision(player2);
+    ctx.drawImage(darknessCanvas, 0, 0);
+
+    attackEffects = attackEffects.filter(e => now - e.startTime < e.duration);
+    attackEffects.forEach(e => {
+        if (e.x < vx || e.x >= vx+VIEW_TILES_X || e.y < vy || e.y >= vy+VIEW_TILES_Y) return;
+        const t = (now - e.startTime) / e.duration;
+        const sc = ATTACK_SCALE_START - t*(ATTACK_SCALE_START-1);
+        const dx = (e.x - vx)*SCALED_TILE, dy = (e.y - vy)*SCALED_TILE;
+        ctx.save(); ctx.translate(dx, dy); ctx.scale(sc, sc);
+        if(e.type==='goblin') ctx.drawImage(goblinAttackImg, -SCALED_TILE/2, -SCALED_TILE/2, SCALED_TILE, SCALED_TILE);
+        else {
+            if(e.owner==='p2') ctx.filter='invert(1)';
+            ctx.drawImage(playerAttackImg, -SCALED_TILE/2, -SCALED_TILE/2, SCALED_TILE, SCALED_TILE); 
+        }
+        ctx.restore();
+    });
+
+    ctx.restore(); 
+
+    drawAnalogClock();
+
+    if (isDebugMode) {
+        ctx.drawImage(minimapCanvas, VIRTUAL_WIDTH - 190, VIRTUAL_HEIGHT - 190);
+    }
+    drawHeartsUI();
+    
+    // --- ★修正: メッセージ表示（合意制・赤字） ---
+    if (signalState.active) {
+        let msg = "";
+        
+        if (gameCleared) {
+            // クリア時
+            if (signalState.type === 'R') msg = "続行の合図だ！(R)";
+            else if (signalState.type === 'W') msg = "帰還の合図だ！(W)";
+        } else if (isGameOver) {
+            // ゲームオーバー時
+            if (signalState.type === 'R') msg = "再起の合図だ！(R)";
+            else if (signalState.type === 'W') msg = "帰還の合図だ！(W)";
+        } else {
+            // プレイ中
+            if (signalState.type === 'R') msg = "撤退の合図だ！(R)";
+        }
+        
+        if (msg) {
+            signalMsgEl.innerText = msg;
+            signalMsgEl.style.opacity = 1;
+            
+            // 合意成立時 (2秒待機中) は赤文字に
+            if (signalState.agreedTime) {
+                signalMsgEl.style.color = "#ff0000";
+                signalMsgEl.style.borderColor = "#ff0000";
+            } else {
+                signalMsgEl.style.color = "#ff0";
+                signalMsgEl.style.borderColor = "rgba(255,255,255,0.5)";
+            }
+        } else {
+            signalMsgEl.style.opacity = 0;
+        }
+    } else {
+        signalMsgEl.style.opacity = 0;
+    }
+} // --- drawGameScreen終了 ---
+
+function drawAnalogClock() {
+    const CX = VIRTUAL_WIDTH - 60; 
+    const CY = 141; // Y=141 (マージン調整)
+    const R = 34;   // R=34 (サイズ調整)
+
+    const t = (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime;
+    const sBase = shortestPathSteps * 1.1; 
+    const maxTime = (sBase * 2.8) + 1.0; 
+
+    const startAngle = -Math.PI / 2;
+    const totalRad = Math.PI * 2;
+
+    const sRatio = 20 / 61;
+    const aRatio = 40 / 61;
+    const bRatio = 60 / 61;
+    
+    const angleS = startAngle + totalRad * sRatio;
+    const angleA = startAngle + totalRad * aRatio;
+    const angleB = startAngle + totalRad * bRatio;
+    const angleMax = startAngle + totalRad;
+
+    ctx.save();
+    ctx.translate(CX, CY);
+    
+    // S Zone
+    let gradS = ctx.createRadialGradient(0, 0, R*0.2, 0, 0, R);
+    gradS.addColorStop(0, "#FFFACD"); gradS.addColorStop(0.5, "#FFD700"); gradS.addColorStop(1, "#DAA520");
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, R, startAngle, angleS); ctx.fillStyle = gradS; ctx.fill();
+
+    // A Zone
+    let gradA = ctx.createRadialGradient(0, 0, R*0.2, 0, 0, R);
+    gradA.addColorStop(0, "#FFFFFF"); gradA.addColorStop(0.5, "#C0C0C0"); gradA.addColorStop(1, "#A9A9A9");
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, R, angleS, angleA); ctx.fillStyle = gradA; ctx.fill();
+
+    // B Zone
+    let gradB = ctx.createRadialGradient(0, 0, R*0.2, 0, 0, R);
+    gradB.addColorStop(0, "#FFDAB9"); gradB.addColorStop(0.5, "#CD7F32"); gradB.addColorStop(1, "#8B4513");
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, R, angleA, angleB); ctx.fillStyle = gradB; ctx.fill();
+
+    // C Zone
+    let gradC = ctx.createRadialGradient(0, 0, R*0.2, 0, 0, R);
+    gradC.addColorStop(0, "#555555"); gradC.addColorStop(1, "#000000");
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, R, angleB, angleMax); ctx.fillStyle = gradC; ctx.fill();
+
+    // Frame (Platinum)
+    let gradFrame = ctx.createLinearGradient(-R, -R, R, R);
+    gradFrame.addColorStop(0, "#E5E4E2"); gradFrame.addColorStop(0.5, "#A0A0A0"); gradFrame.addColorStop(1, "#F0F0F0");
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI*2);
+    ctx.strokeStyle = gradFrame; ctx.lineWidth = 4; ctx.stroke();
+
+    // Needle
+    let currentRad;
+    if (t >= maxTime) {
+        const shake = (rnd.nextFloat() - 0.5) * 0.2; 
+        currentRad = angleMax + shake;
+    } else {
+        currentRad = startAngle + (t / maxTime) * totalRad;
+    }
+
+    const tipX = Math.cos(currentRad) * (R - 4);
+    const tipY = Math.sin(currentRad) * (R - 4);
+    const tailX = Math.cos(currentRad + Math.PI) * 8; 
+    const tailY = Math.sin(currentRad + Math.PI) * 8; 
+    
+    let gradNeedle = ctx.createLinearGradient(tailX, tailY, tipX, tipY);
+    gradNeedle.addColorStop(0, "#E5E4E2"); gradNeedle.addColorStop(1, "#FFFFFF");
+
+    ctx.beginPath(); ctx.moveTo(tailX, tailY); ctx.lineTo(tipX, tipY);
+    ctx.strokeStyle = gradNeedle; ctx.lineWidth = 3; ctx.stroke();
+    
+    ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, Math.PI*2);
+    ctx.fillStyle = gradFrame; ctx.fill();
+
+    ctx.restore();
+} // --- drawAnalogClock終了 ---
+
+function drawHeartsUI() {
+    const heartSize = 30;
+    const startX = 70;
+    const startY = 20;    
+    const spacingX = 35;  
+    const spacingY = 35;  
+    
+    ctx.save();
+    ctx.font = `${heartSize}px 'DotGothic16'`;
+    ctx.textBaseline = "top";
+    
+    let targetHp = hpP1;
+    if (!isDebugMode && !isHost) {
+        targetHp = hpP2;
+    }
+    
+    for (let i = 0; i < 10; i++) {
+        const row = Math.floor(i / 5); 
+        const col = i % 5;              
+        const x = startX + col * spacingX;
+        const y = startY + row * spacingY;
+        
+        if (isGreyMode) {
+            ctx.strokeStyle = "#002211"; 
+            ctx.lineWidth = 4;
+            if (i < targetHp) {
+                ctx.fillStyle = "#00ffaa"; 
+            } else {
+                ctx.fillStyle = "#113322";
+            }
+        } else {
+            ctx.strokeStyle = "#000000"; 
+            ctx.lineWidth = 4;
+            if (i < targetHp) {
+                ctx.fillStyle = "#ff0000";
+            } else {
+                ctx.fillStyle = "#333333";
+            }
+        }
+        ctx.strokeText("♥", x, y);
+        ctx.fillText("♥", x, y);
+    }
+    ctx.restore();
+} // --- drawHeartsUI終了 ---
+
+function renderFloorCanvas() {
+    floorCanvas.width = GRID_W * SCALED_TILE; floorCanvas.height = GRID_H * SCALED_TILE;
+    floorCtx.fillStyle = "#000"; floorCtx.fillRect(0,0,floorCanvas.width, floorCanvas.height);
+    
+    for(let y=0; y<GRID_H; y++) {
+        for(let x=0; x<GRID_W; x++) {
+            let isFloor = grid[y][x] === 1;
+            let isAdj = false;
+            if (!isFloor) {
+                for(let dy=-1; dy<=1; dy++) {
+                    for(let dx=-1; dx<=1; dx++) {
+                        if(grid[y+dy] && grid[y+dy][x+dx] === 1) isAdj = true;
+                    }
+                }
+            }
+            
+            if (isFloor || isAdj) {
+                const v = floorVariant[y][x];
+                let rot=0, fx=1, fy=1;
+                if(v===1) rot=Math.PI/2; if(v===2) rot=Math.PI; if(v===3) rot=Math.PI*1.5;
+                if(v===4) fx=-1; if(v===5) fy=-1;
+                
+                floorCtx.save();
+                floorCtx.translate(x*SCALED_TILE+SCALED_TILE/2, y*SCALED_TILE+SCALED_TILE/2);
+                floorCtx.rotate(rot); floorCtx.scale(fx, fy);
+                
+                const targetImg = isGreyMode && greySpaceFloorImg.complete ? greySpaceFloorImg : floorTileImg;
+                if(targetImg.complete) floorCtx.drawImage(targetImg, -SCALED_TILE/2, -SCALED_TILE/2, SCALED_TILE, SCALED_TILE);
+                else { floorCtx.fillStyle="#555"; floorCtx.fillRect(-SCALED_TILE/2,-SCALED_TILE/2,SCALED_TILE,SCALED_TILE); }
+                
+                if (!isGreyMode) {
+                    floorCtx.globalCompositeOperation = 'multiply';
+                    floorCtx.fillStyle = currentStageColor;
+                    floorCtx.fillRect(-SCALED_TILE/2, -SCALED_TILE/2, SCALED_TILE, SCALED_TILE);
+                }
+                floorCtx.restore();
+            }
+        }
+    }
+    
+    floorCtx.fillStyle = "#000";
+    const r = SCALED_TILE * 0.35;
+    
+    for(let y=0; y<GRID_H; y++) {
+        for(let x=0; x<GRID_W; x++) {
+            if (grid[y][x] === 0) {
+                const top = y > 0 && grid[y-1][x] === 1;
+                const bottom = y < GRID_H-1 && grid[y+1][x] === 1;
+                const left = x > 0 && grid[y][x-1] === 1;
+                const right = x < GRID_W-1 && grid[y][x+1] === 1;
+                
+                if (!top && !bottom && !left && !right) {
+                    floorCtx.fillRect(x*SCALED_TILE, y*SCALED_TILE, SCALED_TILE, SCALED_TILE);
+                    continue;
+                }
+
+                const tx = x * SCALED_TILE;
+                const ty = y * SCALED_TILE;
+                
+                floorCtx.beginPath();
+                if (top && left) { floorCtx.moveTo(tx, ty + r); floorCtx.arcTo(tx, ty, tx + r, ty, r); } 
+                else { floorCtx.moveTo(tx, ty); }
+                
+                if (top && right) { floorCtx.lineTo(tx + SCALED_TILE - r, ty); floorCtx.arcTo(tx + SCALED_TILE, ty, tx + SCALED_TILE, ty + r, r); } 
+                else { floorCtx.lineTo(tx + SCALED_TILE, ty); }
+                
+                if (bottom && right) { floorCtx.lineTo(tx + SCALED_TILE, ty + SCALED_TILE - r); floorCtx.arcTo(tx + SCALED_TILE, ty + SCALED_TILE, tx + SCALED_TILE - r, ty + SCALED_TILE, r); } 
+                else { floorCtx.lineTo(tx + SCALED_TILE, ty + SCALED_TILE); }
+                
+                if (bottom && left) { floorCtx.lineTo(tx + r, ty + SCALED_TILE); floorCtx.arcTo(tx, ty + SCALED_TILE, tx, ty + SCALED_TILE - r, r); } 
+                else { floorCtx.lineTo(tx, ty + SCALED_TILE); }
+                
+                floorCtx.closePath();
+                floorCtx.fill();
+            } 
+            else if (grid[y][x] === 1) {
+                const top = y > 0 && grid[y-1][x] === 1;
+                const bottom = y < GRID_H-1 && grid[y+1][x] === 1;
+                const left = x > 0 && grid[y][x-1] === 1;
+                const right = x < GRID_W-1 && grid[y][x+1] === 1;
+                
+                const tx = x * SCALED_TILE;
+                const ty = y * SCALED_TILE;
+                
+                if (!top && !left) {
+                    floorCtx.beginPath(); floorCtx.moveTo(tx, ty); floorCtx.lineTo(tx + r, ty);
+                    floorCtx.arc(tx + r, ty + r, r, Math.PI*1.5, Math.PI, true); floorCtx.fill();
+                }
+                if (!top && !right) {
+                    floorCtx.beginPath(); floorCtx.moveTo(tx + SCALED_TILE, ty); floorCtx.lineTo(tx + SCALED_TILE - r, ty);
+                    floorCtx.arc(tx + SCALED_TILE - r, ty + r, r, Math.PI*1.5, Math.PI*2); floorCtx.fill();
+                }
+                if (!bottom && !left) {
+                    floorCtx.beginPath(); floorCtx.moveTo(tx, ty + SCALED_TILE); floorCtx.lineTo(tx + r, ty + SCALED_TILE);
+                    floorCtx.arc(tx + r, ty + SCALED_TILE - r, r, Math.PI*0.5, Math.PI); floorCtx.fill();
+                }
+                if (!bottom && !right) {
+                    floorCtx.beginPath(); floorCtx.moveTo(tx + SCALED_TILE, ty + SCALED_TILE); floorCtx.lineTo(tx + SCALED_TILE - r, ty + SCALED_TILE);
+                    floorCtx.arc(tx + SCALED_TILE - r, ty + SCALED_TILE - r, r, Math.PI*0.5, 0, true); floorCtx.fill();
+                }
+            }
+        }
+    }
+    
+    const gradYStart = GRID_H * SCALED_TILE; 
+    const gradYEnd = (GRID_H - 3) * SCALED_TILE; 
+    
+    const grad = floorCtx.createLinearGradient(0, gradYStart, 0, gradYEnd);
+    grad.addColorStop(0, isGreyMode ? "rgba(0, 255, 100, 0.8)" : "rgba(255, 255, 200, 0.8)"); 
+    grad.addColorStop(1, isGreyMode ? "rgba(0, 255, 100, 0)" : "rgba(255, 255, 200, 0)");    
+    
+    floorCtx.fillStyle = grad;
+    floorCtx.fillRect(startLeftX*SCALED_TILE, gradYEnd, SCALED_TILE*2, SCALED_TILE*3);
+    
+    floorDrawn = true;
+} // --- renderFloorCanvas終了 ---
+
+function updateMinimap() {
+    const size = 180;
+    if (minimapCanvas.width !== size) minimapCanvas.width = minimapCanvas.height = size;
+    if (!minimapFloorDrawn) {
+        minimapFloorCanvas.width = minimapFloorCanvas.height = size;
+        const scale = size / Math.max(GRID_W, GRID_H);
+        minimapFloorCtx.fillStyle = "#444";
+        for(let y=0; y<GRID_H; y++) for(let x=0; x<GRID_W; x++) if(grid[y][x]===1) minimapFloorCtx.fillRect(x*scale, y*scale, 1, 1);
+        minimapFloorDrawn = true;
+    }
+    minimapCtx.fillStyle = "#111"; minimapCtx.fillRect(0,0,size,size);
+    minimapCtx.drawImage(minimapFloorCanvas, 0, 0);
+    const scale = size / Math.max(GRID_W, GRID_H);
+    
+    const drawDot = (x,y,c,s=3) => { minimapCtx.fillStyle=c; minimapCtx.fillRect(x*scale-s/2, y*scale-s/2, s, s); };
+    
+    drawDot(player1.x, player1.y, "#0ff", 5); 
+    drawDot(player2.x, player2.y, "#f90", 5); 
+    
+    if(!daughter.rescued) drawDot(daughter.x, daughter.y, "#ff0");
+    goblins.forEach(g => { if(g.hp>0) drawDot(g.x, g.y, g.state===STATE.RAGE?"#a0f":"#fa0"); });
+} // --- updateMinimap終了 ---
+
+function updateInfoText() {
+    document.getElementById('info-panel').innerHTML = "";
+} // --- updateInfoText終了 ---
+
+// --- 入力・データ保存イベント ---
+const saveVolume = () => {
+    if (isDraggingBGM || isDraggingSE) {
+        localStorage.setItem('goblinsNest_bgmVol', bgmVolume);
+        localStorage.setItem('goblinsNest_seVol', seVolume);
+    }
+    isDraggingBGM = isDraggingSE = false;
+}; // --- saveVolume終了 ---
+
+// --- ★合図制御用関数 ---
+const handleSignalInput = (keyType) => {
+    const now = performance.now();
+    playSignalSound(keyType); 
+    
+    if (!signalState.active) {
+        // 新規合図開始
+        signalState.active = true;
+        signalState.type = keyType;
+        signalState.startTime = now;
+        
+        if (isHost) signalState.p1 = true;
+        else signalState.p2 = true; // ゲストなら自分のフラグを立てる（ホストへ送信）
+        
+        // メッセージ更新は drawGameScreen で行う
+    } else {
+        // 既存の合図への応答
+        if (signalState.type === keyType) {
+            if (isHost) signalState.p1 = true;
+            else signalState.p2 = true;
+        }
+    }
+    
+    // 状態変化を相手に伝えるため、ここでの処理はフラグ更新のみ。
+    // 実際のメッセージ送信は update ループ内 (ゲスト->ホスト) や SYNC (ホスト->ゲスト) で行われる
+    if (!isHost && conn && conn.open) {
+        // ゲストは即座に自分の合図状態を送る
+        conn.send({ type: 'SIGNAL_INPUT', key: keyType });
+    }
+};
+
+window.addEventListener('keydown', (e) => {
+    if (gameState === 'title') { if (e.key === 'Enter') { gameState='matching'; titleBGM.play().catch(()=>{}); } }
+    else if (gameState === 'game') {
+        if (!isDebugMode) {
+            // --- クライアントサイド予測 (Guestのみ) ---
+            if (!isHost) {
+                let pdx=0, pdy=0;
+                if(e.key==='ArrowUp') pdy=-1; if(e.key==='ArrowDown') pdy=1;
+                if(e.key==='ArrowLeft') pdx=-1; if(e.key==='ArrowRight') pdx=1;
+                // 移動入力があり、かつゲーム中（終了していない）場合のみ予測移動
+                if ((pdx!==0 || pdy!==0) && !isGameOver && !gameCleared) {
+                    movePlayer(player2, pdx, pdy);
+                }
+            }
+
+            if (isHost) {
+                if (!isGameOver && !gameCleared) {
+                    if (e.key === 'z' || e.key === 'Z') playerAttack(player1);
+                    let dx=0, dy=0;
+                    if(e.key==='ArrowUp') dy=-1; if(e.key==='ArrowDown') dy=1;
+                    if(e.key==='ArrowLeft') dx=-1; if(e.key==='ArrowRight') dx=1;
+                    if(dx!==0||dy!==0) movePlayer(player1, dx, dy);
+                }
+                
+                // Rキー（全状態共通: 再起/続行/撤退）
+                if (e.key === 'r' || e.key === 'R') {
+                    handleSignalInput('R');
+                }
+                
+                // Wキー（終了時のみ有効: 帰還）
+                if ((e.key === 'w' || e.key === 'W') && (gameCleared || isGameOver)) {
+                    handleSignalInput('W');
+                }
+            } else {
+                // ゲスト
+                if (!isGameOver && !gameCleared) {
+                    let dx=0, dy=0;
+                    if(e.key==='ArrowUp') dy=-1; if(e.key==='ArrowDown') dy=1;
+                    if(e.key==='ArrowLeft') dx=-1; if(e.key==='ArrowRight') dx=1;
+                    
+                    if (dx!==0 || dy!==0 || e.key==='z' || e.key==='Z') {
+                        if (conn && conn.open) {
+                            conn.send({
+                                type: 'INPUT',
+                                dx: dx, dy: dy,
+                                attack: (e.key==='z' || e.key==='Z')
+                            });
+                        }
+                    }
+                }
+                
+                // ゲストの合図入力
+                if (e.key === 'r' || e.key === 'R') {
+                    handleSignalInput('R');
+                }
+                if ((e.key === 'w' || e.key === 'W') && (gameCleared || isGameOver)) {
+                    handleSignalInput('W');
+                }
+            }
+        } else {
+            // デバッグモード（既存処理）
+            if (e.key === 'z' || e.key === 'Z') playerAttack(player1);
+            if (e.key === 'x' || e.key === 'X') { if(gameCleared || isGameOver) document.getElementById('result-rank').style.display='none'; else playerAttack(player2); }
+            
+            if (e.key === 'r' || e.key === 'R') {
+                startDungeonGame(true);
+            }
+            
+            let dx=0, dy=0;
+            if(e.key==='ArrowUp') dy=-1; if(e.key==='ArrowDown') dy=1;
+            if(e.key==='ArrowLeft') dx=-1; if(e.key==='ArrowRight') dx=1;
+            if(dx!==0||dy!==0) movePlayer(player1, dx, dy);
+            
+            dx=0; dy=0;
+            if(e.key==='w'||e.key==='W') { 
+                if (!gameCleared) dy=-1; 
+            } 
+            if(e.key==='s'||e.key==='S') dy=1;
+            if(e.key==='a'||e.key==='A') dx=-1; if(e.key==='d'||e.key==='D') dx=1;
+            if(dx!==0||dy!==0) movePlayer(player2, dx, dy);
+        }
+    }
+}); // --- keydown終了 ---
+
+function getMousePos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scX = VIRTUAL_WIDTH/rect.width, scY = VIRTUAL_HEIGHT/rect.height;
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: (cx-rect.left)*scX, y: (cy-rect.top)*scY };
+} // --- getMousePos終了 ---
+
+// --- ★PeerJS 初期化と名前同期 ---
+function initPeer(password) {
+    if (peer) { peer.destroy(); peer = null; }
+    
+    const hostID = PEER_ID_PREFIX + hashCode(password) + "_host";
+    
+    peer = new Peer(hostID, { debug: 1 });
+    
+    peer.on('open', (id) => {
+        console.log('Host initialized:', id);
+        isHost = true;
+        isMatching = true; 
+        p1Name = nameEl.value; // 自分がホストならP1
+    });
+
+    peer.on('error', (err) => {
+        if (err.type === 'unavailable-id') {
+            console.log('Host ID taken. Switching to Guest.');
+            peer.destroy(); 
+            peer = new Peer({ debug: 1 });
+            
+            peer.on('open', (guestId) => {
+                conn = peer.connect(hostID);
+                setupConnection(conn);
+            });
+        } else {
+            console.error(err);
+        }
+    });
+
+    peer.on('connection', (connection) => {
+        conn = connection;
+        setupConnection(conn);
+    });
+}
+
+// 接続確立時の処理（名前交換とエフェクトイベントを含む）
+function setupConnection(connection) {
+    connection.on('open', () => {
+        console.log('Connected!');
+        isConnected = true;
+        isMatching = false; 
+        
+        // ★接続確立直後に名前交換
+        if (!isHost) {
+            // ゲスト(P2)から自分の名前を送信
+            conn.send({ type: 'HELLO', name: nameEl.value });
+        }
+    });
+
+    connection.on('data', (data) => {
+        if (isHost) {
+            if (data.type === 'INPUT') {
+                guestInputState.dx = data.dx;
+                guestInputState.dy = data.dy;
+                // ★修正: 攻撃フラグは「処理した瞬間」にfalseにするため、受信時はtrue維持
+                if (data.attack) guestInputState.attack = true;
+            }
+            // ★ゲストからの合図受信
+            else if (data.type === 'SIGNAL_INPUT') {
+                if (!signalState.active) {
+                    signalState.active = true;
+                    signalState.type = data.key;
+                    signalState.startTime = performance.now();
+                    signalState.p2 = true;
+                    playSignalSound(data.key);
+                } else if (signalState.type === data.key) {
+                    signalState.p2 = true;
+                    playSignalSound(data.key);
+                }
+            }
+            // ★ホスト：ゲストから名前を受信
+            else if (data.type === 'HELLO') {
+                p2Name = data.name; // P2の名前を更新
+                // ゲストに自分の名前(P1)を教える
+                conn.send({ type: 'WELCOME', p1Name: p1Name });
+            }
+        } else {
+            if (data.type === 'START') {
+                rnd = new Xorshift(data.seed); 
+                startDungeonGame(false);
+            } 
+            else if (data.type === 'GO_TITLE') {
+                location.reload();
+            }
+            // ★ゲスト：ホストから名前を受信
+            else if (data.type === 'WELCOME') {
+                p1Name = data.p1Name;
+                p2Name = nameEl.value; // 自分はP2
+            }
+            else if (data.type === 'SYNC') {
+                player1.x = data.p1.x; player1.y = data.p1.y; player1.facing = data.p1.f; player1.stepCount = data.p1.sc;
+                // --- P2位置の同期補正 (クライアントサイド予測の調整) ---
+                const distP2 = Math.abs(player2.x - data.p2.x) + Math.abs(player2.y - data.p2.y);
+                if (distP2 > 0) { // サーバーとズレがある場合
+                    player2.x = data.p2.x; 
+                    player2.y = data.p2.y; 
+                    player2.facing = data.p2.f; 
+                    player2.stepCount = data.p2.sc;
+                }
+                
+                hpP1 = data.hp.p1; hpP2 = data.hp.p2;
+                daughter.x = data.d.x; daughter.y = data.d.y; daughter.rescued = data.d.r; daughter.rescuer = data.d.er;
+                
+                goblins = data.g.map(gd => ({
+                    x: gd.x, y: gd.y, facing: gd.f, state: gd.s, hp: gd.hp,
+                    sizeScale: gd.sc, bobOffset: gd.bo,
+                    deathTime: gd.dt, deathAngle: gd.da, dissolveProgress: gd.dp,
+                    isCasting: gd.ic
+                }));
+                
+                // attackEffectsは同期しない（個別にイベントで受け取る）
+                signalState = data.sig; 
+                
+                if (timerStopped) fixedTime = data.t;
+                else startTime = (performance.now()/1000) - data.t;
+
+                // --- ★修正: ゲスト側でゲームオーバー/クリア検知時に画面表示 ---
+                if (!isGameOver && data.go) {
+                    isGameOver = true;
+                    timerStopped = true;
+                    showResult();
+                }
+                if (!gameCleared && data.cl) {
+                    gameCleared = true;
+                    stopCurrentBgm();
+                    if (!isGreyMode) {
+                        clearBGM.currentTime = 0;
+                        clearBGM.loop = true; 
+                        clearBGM.play().catch(()=>{});
+                    }
+                    showResult();
+                }
+                
+                isGameOver = data.go; // 上記if文後に上書き
+                gameCleared = data.cl;
+                isGreyMode = data.gm;
+
+                if (isGreyMode) canvas.classList.add('grey-mode-canvas');
+                else canvas.classList.remove('grey-mode-canvas');
+            }
+            // ★エフェクト発生イベント受信
+            else if (data.type === 'SPAWN_EFFECT') {
+                // 受信側（ゲスト）の時間でエフェクトを開始
+                attackEffects.push({
+                    x: data.x, y: data.y,
+                    type: data.kind, owner: data.owner, dir: data.dir,
+                    startTime: performance.now(), duration: 100
+                });
+            }
+        }
+    });
+}
+
+function handleDown(e) {
+    // ゲート画面中は反応しない
+    if (gameState === 'gate') return;
+
+    const pos = getMousePos(e);
+    if (pos.x >= UI_X - 30 && pos.x <= UI_X + BAR_W + 10) {
+        if (pos.y >= UI_Y_START - 5 && pos.y <= UI_Y_START + BAR_H + 5) isDraggingBGM = true;
+        if (pos.y >= UI_Y_START + 30 && pos.y <= UI_Y_START + 30 + BAR_H + 5) isDraggingSE = true;
+    }
+    if (gameState === 'title') { 
+        if(pos.x > 300 && pos.x < 700 && pos.y > 200 && pos.y < 450) { gameState='matching'; titleBGM.play().catch(()=>{}); }
+    }
+    else if (gameState === 'matching') {
+        if (pos.x > VIRTUAL_WIDTH/2 - 80 && pos.x < VIRTUAL_WIDTH/2 + 80 && pos.y > 440 && pos.y < 500) {
+            
+            if (isConnected) {
+                if (isHost) {
+                    playChurchBell(); // ★開始時の鐘の音
+                    startDungeonGame(false); 
+                } else {
+                }
+            } else if (isMatching) {
+                isMatching = false;
+                nameEl.disabled = false;
+                passEl.disabled = false;
+                if (peer) { peer.destroy(); peer = null; }
+            } else {
+                if(nameEl.value && passEl.value) {
+                    playClickSound(); // ★待機ボタンのカチャ音
+                    localStorage.setItem('goblinsNest_name', nameEl.value);
+                    localStorage.setItem('goblinsNest_pass', passEl.value);
+                    initPeer(passEl.value);
+                }
+            }
+            if (document.activeElement === nameEl || document.activeElement === passEl) {
+                nameEl.blur(); passEl.blur();
+            }
+        }
+        if (!isMatching && !isConnected && pos.x > VIRTUAL_WIDTH - 150 && pos.x < VIRTUAL_WIDTH - 50 && pos.y > VIRTUAL_HEIGHT - 80) {
+            startDungeonGame(true); 
+        }
+    }
+} // --- handleDown終了 ---
+
+canvas.addEventListener('mousedown', handleDown);
+window.addEventListener('mousemove', (e) => {
+    if (!isDraggingBGM && !isDraggingSE) return;
+    const pos = getMousePos(e);
+    let vol = Math.max(0, Math.min(1, (pos.x - UI_X) / BAR_W));
+    if (isDraggingBGM) bgmVolume = vol;
+    if (isDraggingSE) seVolume = vol;
+});
+window.addEventListener('mouseup', saveVolume);
+canvas.addEventListener('touchstart', (e) => { if(gameState!=='game') { e.preventDefault(); handleDown(e); } }, {passive:false});
+window.addEventListener('touchend', saveVolume);
+
+nameEl.addEventListener('input', () => {
+    localStorage.setItem('goblinsNest_name', nameEl.value);
+});
+passEl.addEventListener('input', () => {
+    passEl.value = passEl.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)).replace(/[^a-zA-Z0-9]/g, '');
+    localStorage.setItem('goblinsNest_pass', passEl.value);
+});
+
+update();
+</script>
+</body>
+</html>
