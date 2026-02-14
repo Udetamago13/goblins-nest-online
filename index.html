@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.5</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.6</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -217,6 +217,9 @@ let isMatching = false;
 let isConnected = false; 
 let isHost = false; 
 let guestInputState = { dx: 0, dy: 0, attack: false }; 
+// ★修正: 通信間引き用変数
+let lastSyncTime = 0;
+const SYNC_INTERVAL = 33; // 約30FPSで通信
 
 let otherPlayerName = ""; 
 
@@ -273,9 +276,9 @@ const visionHoleCanvas = document.createElement('canvas');
 visionHoleCanvas.width = visionSize; visionHoleCanvas.height = visionSize;
 const vhCtx = visionHoleCanvas.getContext('2d');
 const vhGrad = vhCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
-vhGrad.addColorStop(0, "rgba(0,0,0,1)");           
+vhGrad.addColorStop(0, "rgba(0,0,0,1)");            
 vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");        
-vhGrad.addColorStop(1, "rgba(0,0,0,0)");           
+vhGrad.addColorStop(1, "rgba(0,0,0,0)");            
 vhCtx.fillStyle = vhGrad;
 vhCtx.beginPath(); vhCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); vhCtx.fill();
 
@@ -357,7 +360,6 @@ const SE = {
 Object.values(SE).flat().forEach(audio => { audio.preload = 'auto'; });
 
 let grid = [], floorVariant = [];
-// ★修正: deathDirを追加
 let player1 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0, deathDir: 0};
 let player2 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0, deathDir: 0};
 let daughter = {x: 0, y: 0, rescued: false, rescuer: null};
@@ -484,7 +486,6 @@ function update() {
     updateInputPosition(); 
     
     if (gameState === 'game') {
-        // ★修正: HPによるゲームオーバーの強制チェック (同期漏れ防止)
         if (!isDebugMode && (hpP1 <= 0 || hpP2 <= 0) && !isGameOver) {
             isGameOver = true;
             timerStopped = true;
@@ -521,27 +522,31 @@ function update() {
                 gameLoopStep(); 
 
                 if (conn && conn.open) {
-                    const state = {
-                        type: 'SYNC',
-                        // ★修正: deathDir (dd) を送信
-                        p1: { x: player1.x, y: player1.y, f: player1.facing, sc: player1.stepCount, dd: player1.deathDir },
-                        p2: { x: player2.x, y: player2.y, f: player2.facing, sc: player2.stepCount, dd: player2.deathDir },
-                        hp: { p1: hpP1, p2: hpP2 },
-                        d: { x: daughter.x, y: daughter.y, r: daughter.rescued, er: daughter.rescuer },
-                        g: goblins.map(g => ({
-                            x: g.x, y: g.y, f: g.facing, s: g.state, hp: g.hp, 
-                            sc: g.sizeScale, bo: g.bobOffset,
-                            dt: g.deathTime, da: g.deathAngle, dp: g.dissolveProgress,
-                            ic: g.isCasting
-                        })),
-                        sig: signalState, 
-                        t: (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime,
-                        cl: gameCleared,
-                        go: isGameOver,
-                        gm: isGreyMode,
-                        hn: nameEl.value 
-                    };
-                    conn.send(state);
+                    // ★修正: 通信間引き処理 (SYNC_INTERVALごとに送信)
+                    const now = performance.now();
+                    if (now - lastSyncTime > SYNC_INTERVAL) {
+                        const state = {
+                            type: 'SYNC',
+                            p1: { x: player1.x, y: player1.y, f: player1.facing, sc: player1.stepCount, dd: player1.deathDir },
+                            p2: { x: player2.x, y: player2.y, f: player2.facing, sc: player2.stepCount, dd: player2.deathDir },
+                            hp: { p1: hpP1, p2: hpP2 },
+                            d: { x: daughter.x, y: daughter.y, r: daughter.rescued, er: daughter.rescuer },
+                            g: goblins.map(g => ({
+                                x: g.x, y: g.y, f: g.facing, s: g.state, hp: g.hp, 
+                                sc: g.sizeScale, bo: g.bobOffset,
+                                dt: g.deathTime, da: g.deathAngle, dp: g.dissolveProgress,
+                                ic: g.isCasting
+                            })),
+                            sig: signalState, 
+                            t: (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime,
+                            cl: gameCleared,
+                            go: isGameOver,
+                            gm: isGreyMode,
+                            hn: nameEl.value 
+                        };
+                        conn.send(state);
+                        lastSyncTime = now;
+                    }
                 }
             }
         } else {
@@ -1880,7 +1885,6 @@ function damagePlayer(p, amount) {
     if (hpP1 <= 0 || hpP2 <= 0) {
         if (!isDebugMode && !isGameOver && !gameCleared) {
             isGameOver = true; timerStopped = true;
-            // 両者に死亡方向を割り当て
             player1.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
             player2.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
             
@@ -2170,7 +2174,6 @@ function drawGameScreen() {
 
     [player1, player2].forEach(p => {
         const isP2 = p === player2;
-        // ★修正: ゲームオーバー判定 (強制チェックで確実に)
         const isDead = (hpP1 <= 0 || hpP2 <= 0) || isGameOver; 
         const shake = (now - p.hitShakeTime < HIT_SHAKE_DURATION) ? (rnd.nextFloat()*6-3) : 0; 
         
@@ -2180,7 +2183,6 @@ function drawGameScreen() {
         if (isDead && !isDebugMode) {
              let rot = (Math.PI / 2) * (p.deathDir || 1); 
              ctx.save();
-             // フィルターで真っ黒に
              drawSprite(playerImages.side, p.x, p.y, 1, 1, 0, 'brightness(0)', rot, 5);
              ctx.restore();
         } 
@@ -2298,7 +2300,6 @@ function drawGameScreen() {
     }
     drawHeartsUI();
     
-    // ★修正: 合図テキストの表示条件 (ゲームオーバー判定をここでも強化)
     const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
     
     if (signalState.active) {
@@ -2433,7 +2434,7 @@ function drawHeartsUI() {
     
     for (let i = 0; i < 10; i++) {
         const row = Math.floor(i / 5); 
-        const col = i % 5;               
+        const col = i % 5;                
         const x = startX + col * spacingX;
         const y = startY + row * spacingY;
         
@@ -2571,7 +2572,7 @@ function renderFloorCanvas() {
     
     const grad = floorCtx.createLinearGradient(0, gradYStart, 0, gradYEnd);
     grad.addColorStop(0, isGreyMode ? "rgba(0, 255, 100, 0.8)" : "rgba(255, 255, 200, 0.8)"); 
-    grad.addColorStop(1, isGreyMode ? "rgba(0, 255, 100, 0)" : "rgba(255, 255, 200, 0)");       
+    grad.addColorStop(1, isGreyMode ? "rgba(0, 255, 100, 0)" : "rgba(255, 255, 200, 0)");        
     
     floorCtx.fillStyle = grad;
     floorCtx.fillRect(startLeftX*SCALED_TILE, gradYEnd, SCALED_TILE*2, SCALED_TILE*3);
@@ -2723,6 +2724,9 @@ passEl.addEventListener('input', () => {
 
 const keys = {};
 window.addEventListener('keydown', (e) => {
+    // ★修正: IME入力中はキーイベントを無効化 (誤作動防止)
+    if (e.isComposing || e.keyCode === 229) return;
+    
     keys[e.key] = true;
     if (gameState === 'game') {
         const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
@@ -2922,7 +2926,6 @@ function setupConnection() {
                 hpP1 = data.hp.p1; hpP2 = data.hp.p2;
                 daughter.x = data.d.x; daughter.y = data.d.y; daughter.rescued = data.d.r; daughter.rescuer = data.d.er;
                 
-                // ★修正: 死亡方向(deathDir)を受け取り反映
                 if (data.p1.dd) player1.deathDir = data.p1.dd;
                 if (data.p2.dd) player2.deathDir = data.p2.dd;
 
@@ -2951,19 +2954,19 @@ function setupConnection() {
                     seed: data.seed, 
                     colorIdx: data.colorIdx, 
                     bgmIdx: data.bgmIdx,
-                    playCount: data.playCount
+                    playCount: data.playCount 
                 });
                 
             } else if (data.type === 'SPAWN_EFFECT') {
                 if (data.kind === 'goblin') {
                       attackEffects.push({
-                         x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
+                          x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
                       });
                       const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); 
                       playSE(SE.goblinAttack, 0.7, 0.15, pitch);
                 } else if (data.kind === 'player') {
                       attackEffects.push({
-                         x: data.x, y: data.y, type: 'player', owner: data.owner, dir: data.dir, startTime: performance.now(), duration: 100
+                          x: data.x, y: data.y, type: 'player', owner: data.owner, dir: data.dir, startTime: performance.now(), duration: 100
                       });
                       playSE(data.owner==='p1'?SE.playerAttack1:SE.playerAttack2, 0.5, 0.05);
                 }
