@@ -36,6 +36,7 @@
         }
         .gate-btn:hover { background: #444; }
 
+        /* 軽量化: CSS変数で明るさを制御し、アニメーションはGPU処理させる */
         @keyframes greyTrip {
             0% { filter: brightness(var(--bright)) saturate(1.2) hue-rotate(-15deg) contrast(1.1); }
             50% { filter: brightness(var(--bright)) saturate(1.2) hue-rotate(15deg) contrast(1.1); }
@@ -48,7 +49,7 @@
         canvas { 
             display: block;
             image-rendering: pixelated; 
-            --bright: 1.0; 
+            --bright: 1.0; /* デフォルト明度 */
         }
         .game-input-area {
             position: absolute; background: transparent; border: none; outline: none;
@@ -148,7 +149,7 @@ function hashCode(str) {
     return Math.abs(hash) + 1;
 }
 
-// --- グローバル変数 ---
+// --- グローバル変数: DOM取得 ---
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const nameEl = document.getElementById('nameInput');
@@ -158,12 +159,26 @@ const infoPanel = document.getElementById('info-panel');
 const signalMsgEl = document.getElementById('signal-message');
 const controlsHelpEl = document.getElementById('controls-help');
 
-// ゲート用要素
 const gateScreen = document.getElementById('gate-screen');
 const gatePassInput = document.getElementById('gate-pass');
 const gateBtn = document.getElementById('gate-btn');
 
 let rnd = new Xorshift(); 
+
+// --- 設定・状態変数初期化 ---
+// ★重要: 変数は必ず最初定義する
+let isGreyMode = false;
+let isDebugMode = false; 
+let gameState = 'gate'; 
+let isDraggingBGM = false;
+let isDraggingSE = false;
+let isDraggingBright = false; 
+
+// ★セッションストレージキー
+const S_KEY_DECK_COLOR = 'gn_deck_color';
+const S_KEY_DECK_BGM = 'gn_deck_bgm';
+const S_KEY_DECK_IDX = 'gn_deck_idx';
+const S_KEY_PLAY_COUNT = 'gn_play_count';
 
 // ローカルストレージ読み込み
 let savedBgm = localStorage.getItem('goblinsNest_bgmVol');
@@ -172,6 +187,9 @@ let savedSe = localStorage.getItem('goblinsNest_seVol');
 let seVolume = savedSe !== null ? parseFloat(savedSe) : 0.5;
 let savedBright = localStorage.getItem('goblinsNest_bright');
 let brightnessLevel = savedBright !== null ? parseFloat(savedBright) : 0.5; 
+
+// プレイ回数はセッションから
+let playCount = parseInt(sessionStorage.getItem(S_KEY_PLAY_COUNT) || '0');
 
 let isMutedBGM = localStorage.getItem('goblinsNest_muteBGM') === 'true';
 let isMutedSE = localStorage.getItem('goblinsNest_muteSE') === 'true';
@@ -184,12 +202,7 @@ const VIRTUAL_HEIGHT = 576;
 canvas.width = VIRTUAL_WIDTH;
 canvas.height = VIRTUAL_HEIGHT;
 
-let gameState = 'gate'; 
-let isDraggingBGM = false;
-let isDraggingSE = false;
-let isDraggingBright = false; 
-
-// --- 通信・マッチング関連 ---
+// 通信変数
 const PEER_ID_PREFIX = 'gn_beta1_'; 
 let peer = null;
 let conn = null;
@@ -201,19 +214,17 @@ let guestInputState = { dx: 0, dy: 0, attack: false };
 let p1Name = "Player1";
 let p2Name = "Player2";
 
-let isGreyMode = false;
-let isDebugMode = false; 
 let psychicArrays = []; 
 let currentBgmDebugName = ""; 
 
 const BAR_W = 80, BAR_H = 15;
 const UI_X = VIRTUAL_WIDTH - (BAR_W + 20), UI_Y_START = 30;
 
+// アセット定義
 const titleBgImg = new Image(); titleBgImg.src = 'assets/bg/title_bg.png';
 const titleBGM = new Audio('assets/bgm/title_bgm.mp3'); titleBGM.loop = true;
 const clearBGM = new Audio('assets/bgm/clear.mp3'); clearBGM.loop = true; 
 
-// ダンジョン定数
 const TILE_SIZE = 8;
 const ZOOM = 7;
 const SCALED_TILE = TILE_SIZE * ZOOM; 
@@ -232,7 +243,7 @@ const IDLE_COOLDOWN = 2000;
 const CHASE_COOLDOWN = 1000;
 const GOBLIN_ATTACK_INTERVAL = 650;
 const GREY_ARRAY_COOLDOWN = 3000; 
-const RAGE_COOLDOWN = 180;
+const RAGE_COOLDOWN = 180; // ★高速化
 const GOBLIN_LOOK_INTERVAL = 300;
 const GOBLIN_UPDATE_INTERVAL = 80;
 const MINIMAP_UPDATE_INTERVAL = 200;
@@ -248,7 +259,7 @@ const ATTACK_COOLDOWN = 0.1;
 
 const STATE = { IDLE: 'idle', ALERT: 'alert', LOCK: 'lock', RAGE: 'rage', CHARGE: 'charge', REAPPEAR: 'reappear', DYING: 'dying' };
 
-// 視界用
+// 視界用Canvas
 const visionRadius = (VISION_RADIUS + 0.5) * SCALED_TILE;
 const visionSize = visionRadius * 2;
 
@@ -256,9 +267,7 @@ const visionHoleCanvas = document.createElement('canvas');
 visionHoleCanvas.width = visionSize; visionHoleCanvas.height = visionSize;
 const vhCtx = visionHoleCanvas.getContext('2d');
 const vhGrad = vhCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
-vhGrad.addColorStop(0, "rgba(0,0,0,1)");         
-vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");      
-vhGrad.addColorStop(1, "rgba(0,0,0,0)");         
+vhGrad.addColorStop(0, "rgba(0,0,0,1)"); vhGrad.addColorStop(0.5, "rgba(0,0,0,1)"); vhGrad.addColorStop(1, "rgba(0,0,0,0)");         
 vhCtx.fillStyle = vhGrad;
 vhCtx.beginPath(); vhCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); vhCtx.fill();
 
@@ -272,7 +281,7 @@ dgGrad.addColorStop(0.8, "rgba(0, 0, 0, 0)");
 dgCtx.fillStyle = dgGrad;
 dgCtx.beginPath(); dgCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); dgCtx.fill();
 
-// アセット配列
+// アセット配列生成
 const FLOOR_COLORS_56 = [];
 for(let i=0; i<50; i++) {
     const hue = (i * 137.5) % 360; 
@@ -280,12 +289,8 @@ for(let i=0; i<50; i++) {
     const light = 50 + (i % 3) * 10; 
     FLOOR_COLORS_56.push(`hsl(${hue}, ${sat}%, ${light}%)`);
 }
-FLOOR_COLORS_56.push("#e0e0e0"); // 50: White-ish
-FLOOR_COLORS_56.push("#2a2a2a"); // 51: Black-ish
-FLOOR_COLORS_56.push("#c5b358"); // 52: Gold
-FLOOR_COLORS_56.push("#c0c0c0"); // 53: Silver
-FLOOR_COLORS_56.push("#cd7f32"); // 54: Bronze
-FLOOR_COLORS_56.push("#e5e4e2"); // 55: Platinum
+FLOOR_COLORS_56.push("#e0e0e0"); FLOOR_COLORS_56.push("#2a2a2a"); FLOOR_COLORS_56.push("#c5b358");
+FLOOR_COLORS_56.push("#c0c0c0"); FLOOR_COLORS_56.push("#cd7f32"); FLOOR_COLORS_56.push("#e5e4e2");
 
 const NORMAL_BGMS_56 = [];
 const RAGE_BGMS_56 = [];
@@ -297,13 +302,6 @@ for(let i=0; i<56; i++) {
 let deckColorIndices = [];
 let deckBgmIndices = [];
 let currentDeckIndex = 0;
-
-const S_KEY_DECK_COLOR = 'gn_deck_color';
-const S_KEY_DECK_BGM = 'gn_deck_bgm';
-const S_KEY_DECK_IDX = 'gn_deck_idx';
-const S_KEY_PLAY_COUNT = 'gn_play_count';
-
-let playCount = parseInt(sessionStorage.getItem(S_KEY_PLAY_COUNT) || '0');
 
 let currentStageColor = null;
 let currentStageBgm = { normal: null, rage: null };
@@ -343,6 +341,7 @@ const SE = {
 };
 Object.values(SE).flat().forEach(audio => { audio.preload = 'auto'; });
 
+// ゲーム内変数
 let grid = [], floorVariant = [];
 let player1 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0};
 let player2 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0};
@@ -373,12 +372,29 @@ let minimapFloorCtx = minimapFloorCanvas.getContext('2d');
 let minimapFloorDrawn = false;
 let lastMinimapUpdate = 0;
 
-// --- 入場ゲート処理 ---
+// --- 関数定義 ---
+
+// ★軽量化: 明度フィルター更新関数
+function updateBrightnessFilter() {
+    const bVal = 0.6 + (brightnessLevel * 0.8);
+    // CSS変数を更新
+    canvas.style.setProperty('--bright', bVal.toFixed(2));
+    if (!isGreyMode) {
+        // 通常時は手動でfilter設定 (CSS変数が効かない場合への保険)
+        canvas.style.filter = `brightness(${bVal.toFixed(2)})`;
+    } else {
+        // グレイモードはアニメーションがfilterを制御するので外す
+        canvas.style.filter = ""; 
+    }
+}
+
+// ゲート関連イベント
 if (localStorage.getItem('goblinsNest_gatePassed')) {
     gateScreen.style.display = 'none';
     gameState = 'title';
 }
 
+// Enterキー対応
 gatePassInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
         gateBtn.click();
@@ -390,6 +406,7 @@ gatePassInput.addEventListener('input', () => {
 });
 
 gateBtn.addEventListener('click', () => {
+    // 空白除去
     if (gatePassInput.value.trim().toLowerCase() === 'cave') {
         gateScreen.style.display = 'none';
         gameState = 'title';
@@ -402,16 +419,7 @@ gateBtn.addEventListener('click', () => {
     }
 });
 
-function updateBrightnessFilter() {
-    const bVal = 0.6 + (brightnessLevel * 0.8);
-    canvas.style.setProperty('--bright', bVal.toFixed(2));
-    if (!isGreyMode) {
-        canvas.style.filter = `brightness(${bVal.toFixed(2)})`;
-    } else {
-        canvas.style.filter = ""; 
-    }
-}
-
+// メインループ
 function update() {
     if (gameState === 'gate') {
         requestAnimationFrame(update);
@@ -637,6 +645,7 @@ function drawMatchingScreen() {
     ctx.fillStyle = "rgba(0, 0, 0, 0.85)"; ctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
     ctx.fillStyle = "white"; ctx.textAlign = "center";
     
+    // 文字位置修正: middle基準で描画
     ctx.textBaseline = "middle";
 
     ctx.font = "28px 'DotGothic16'";
@@ -647,7 +656,7 @@ function drawMatchingScreen() {
     ctx.strokeRect(VIRTUAL_WIDTH/2 - 150, 305, 300, 60);
 
     const btnCenterY = 470;
-    // ★修正: さらに強制的に上げる (-9px)
+    // ★さらに強制引き上げ (-9px)
     const adjY = btnCenterY - 9;
 
     if (isConnected) {
@@ -683,7 +692,7 @@ function drawMatchingScreen() {
         
         ctx.lineWidth = 2;
         ctx.strokeRect(VIRTUAL_WIDTH - 150, VIRTUAL_HEIGHT - 80, 100, 40);
-        // ★修正: 予演ボタンも -9px (516 - 9 = 507)
+        // 予演ボタンも引き上げ (516 - 9 = 507)
         ctx.font = "20px 'DotGothic16'"; ctx.fillText("予演", VIRTUAL_WIDTH - 100, 507);
     }
     ctx.textBaseline = "alphabetic";
@@ -2810,9 +2819,6 @@ function setupConnection() {
         location.reload();
     });
 }
-
-// ★修正: 明度フィルター適用をここに移動（すべての変数が定義された後）
-updateBrightnessFilter();
 
 update();
 </script>
