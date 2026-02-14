@@ -148,7 +148,7 @@ function hashCode(str) {
     return Math.abs(hash) + 1;
 }
 
-// --- グローバル変数 ---
+// --- グローバル変数 (定義順序修正版) ---
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const nameEl = document.getElementById('nameInput');
@@ -165,13 +165,34 @@ const gateBtn = document.getElementById('gate-btn');
 
 let rnd = new Xorshift(); 
 
-// ローカルストレージ読み込み (音量, 明度, ミュート設定)
+// ★重要: 変数定義を先に持ってくる（エラー回避）
+let isGreyMode = false;
+let isDebugMode = false; 
+let gameState = 'gate'; 
+let isDraggingBGM = false;
+let isDraggingSE = false;
+let isDraggingBright = false; 
+
+// ローカルストレージ読み込み
 let savedBgm = localStorage.getItem('goblinsNest_bgmVol');
 let bgmVolume = savedBgm !== null ? parseFloat(savedBgm) : 0.5;
 let savedSe = localStorage.getItem('goblinsNest_seVol');
 let seVolume = savedSe !== null ? parseFloat(savedSe) : 0.5;
 let savedBright = localStorage.getItem('goblinsNest_bright');
 let brightnessLevel = savedBright !== null ? parseFloat(savedBright) : 0.5; 
+
+// ★関数定義（明度更新）
+function updateBrightnessFilter() {
+    const bVal = 0.6 + (brightnessLevel * 0.8);
+    canvas.style.setProperty('--bright', bVal.toFixed(2));
+    if (!isGreyMode) {
+        canvas.style.filter = `brightness(${bVal.toFixed(2)})`;
+    } else {
+        canvas.style.filter = ""; 
+    }
+}
+
+// ★ここで実行（変数が定義された後なのでエラーにならない）
 updateBrightnessFilter();
 
 let isMutedBGM = localStorage.getItem('goblinsNest_muteBGM') === 'true';
@@ -185,11 +206,6 @@ const VIRTUAL_HEIGHT = 576;
 canvas.width = VIRTUAL_WIDTH;
 canvas.height = VIRTUAL_HEIGHT;
 
-let gameState = 'gate'; 
-let isDraggingBGM = false;
-let isDraggingSE = false;
-let isDraggingBright = false;
-
 // --- 通信・マッチング関連 ---
 const PEER_ID_PREFIX = 'gn_beta1_'; 
 let peer = null;
@@ -202,8 +218,6 @@ let guestInputState = { dx: 0, dy: 0, attack: false };
 let p1Name = "Player1";
 let p2Name = "Player2";
 
-let isGreyMode = false;
-let isDebugMode = false; 
 let psychicArrays = []; 
 let currentBgmDebugName = ""; 
 
@@ -380,7 +394,6 @@ if (localStorage.getItem('goblinsNest_gatePassed')) {
     gameState = 'title';
 }
 
-// ★修正: Enterキーでもログイン可能にする
 gatePassInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
         gateBtn.click();
@@ -392,7 +405,6 @@ gatePassInput.addEventListener('input', () => {
 });
 
 gateBtn.addEventListener('click', () => {
-    // ★修正: 空白除去して判定 (.trim())
     if (gatePassInput.value.trim().toLowerCase() === 'cave') {
         gateScreen.style.display = 'none';
         gameState = 'title';
@@ -404,16 +416,6 @@ gateBtn.addEventListener('click', () => {
         setTimeout(() => gateScreen.style.backgroundColor = '#000', 100);
     }
 });
-
-function updateBrightnessFilter() {
-    const bVal = 0.6 + (brightnessLevel * 0.8);
-    canvas.style.setProperty('--bright', bVal.toFixed(2));
-    if (!isGreyMode) {
-        canvas.style.filter = `brightness(${bVal.toFixed(2)})`;
-    } else {
-        canvas.style.filter = ""; 
-    }
-}
 
 function update() {
     if (gameState === 'gate') {
@@ -640,7 +642,7 @@ function drawMatchingScreen() {
     ctx.fillStyle = "rgba(0, 0, 0, 0.85)"; ctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
     ctx.fillStyle = "white"; ctx.textAlign = "center";
     
-    // ★修正: 文字位置を強制的に-5px (引き上げ)
+    // ★修正: 文字位置のベースライン設定
     ctx.textBaseline = "middle";
 
     ctx.font = "28px 'DotGothic16'";
@@ -650,10 +652,9 @@ function drawMatchingScreen() {
     ctx.strokeRect(VIRTUAL_WIDTH/2 - 350, 160, 700, 100);
     ctx.strokeRect(VIRTUAL_WIDTH/2 - 150, 305, 300, 60);
 
-    // ボタンのY中心は 470
     const btnCenterY = 470;
-    // ★修正: さらに強制的に5px上げる (470 - 5 = 465)
-    const adjY = btnCenterY - 5;
+    // ★修正: さらに強制的に上げる (-9px)
+    const adjY = btnCenterY - 9;
 
     if (isConnected) {
         ctx.fillStyle = "#ff0000"; 
@@ -688,9 +689,8 @@ function drawMatchingScreen() {
         
         ctx.lineWidth = 2;
         ctx.strokeRect(VIRTUAL_WIDTH - 150, VIRTUAL_HEIGHT - 80, 100, 40);
-        // 予演ボタンの中心Yは 516
-        // ★修正: これも5px上げる (516 - 5 = 511)
-        ctx.font = "20px 'DotGothic16'"; ctx.fillText("予演", VIRTUAL_WIDTH - 100, 511);
+        // ★修正: 予演ボタンも -9px (516 - 9 = 507)
+        ctx.font = "20px 'DotGothic16'"; ctx.fillText("予演", VIRTUAL_WIDTH - 100, 507);
     }
     ctx.textBaseline = "alphabetic";
 }
@@ -2491,6 +2491,7 @@ function handleDown(e) {
     if (gameState === 'gate') return;
 
     const pos = getMousePos(e);
+    
     const volAreaX = UI_X - 10;
     
     if (pos.x >= volAreaX && pos.x <= UI_X + BAR_W + 10) {
