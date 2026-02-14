@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.6</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.7</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -136,6 +136,20 @@ class Xorshift {
         return (this.w >>> 0) / 4294967296;
     }
 } // --- Xorshift 終了 ---
+
+// --- 音響資源管理用シングルトン ---
+let sharedAudioCtx = null;
+
+function getSharedAudioContext() {
+    if (!sharedAudioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) sharedAudioCtx = new AC();
+    }
+    if (sharedAudioCtx && sharedAudioCtx.state === 'suspended') {
+        sharedAudioCtx.resume().catch(()=>{});
+    }
+    return sharedAudioCtx;
+} // --- getSharedAudioContext 終了 ---
 
 function hashCode(str) {
     let hash = 0;
@@ -275,9 +289,9 @@ const visionHoleCanvas = document.createElement('canvas');
 visionHoleCanvas.width = visionSize; visionHoleCanvas.height = visionSize;
 const vhCtx = visionHoleCanvas.getContext('2d');
 const vhGrad = vhCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
-vhGrad.addColorStop(0, "rgba(0,0,0,1)");            
+vhGrad.addColorStop(0, "rgba(0,0,0,1)");             
 vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");        
-vhGrad.addColorStop(1, "rgba(0,0,0,0)");            
+vhGrad.addColorStop(1, "rgba(0,0,0,0)");             
 vhCtx.fillStyle = vhGrad;
 vhCtx.beginPath(); vhCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); vhCtx.fill();
 
@@ -636,7 +650,8 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
     ctx.textAlign = "right";
     ctx.textBaseline = "middle"; 
     const textX = UI_X - 10;
-    const textY = y + BAR_H/2;
+    // 修正: 物理補正 -4px を適用
+    const textY = y + BAR_H/2 - 4; 
     ctx.fillText(label, textX, textY);
 
     if (isMuted) {
@@ -644,6 +659,7 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
         ctx.strokeStyle = "red";
         ctx.lineWidth = 2;
         ctx.beginPath();
+        // 修正: 斜線位置も補正後の座標に合わせる
         ctx.moveTo(textX - textWidth, textY + 6);
         ctx.lineTo(textX + 2, textY - 6);
         ctx.stroke();
@@ -667,7 +683,7 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
     ctx.closePath();
     ctx.fillStyle = color; 
     ctx.fill();
-} 
+} // --- drawTriangleVolumeBar 終了 ---
 
 function drawTitleScreen() {
     ctx.textAlign = "center";
@@ -883,11 +899,10 @@ function playSE(audioArrayOrSingle, volumeRatio = 0.6, pitchRand = 0.1, basePitc
 
 function playElectronicBlip() {
     if (isMutedSE) return;
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
+    const actx = getSharedAudioContext(); 
+    if (!actx) return;
     
     try {
-        const actx = new AudioContext();
         const osc = actx.createOscillator();
         const gain = actx.createGain();
         osc.type = 'sine';
@@ -901,22 +916,17 @@ function playElectronicBlip() {
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
         osc.start(now);
         osc.stop(now + 0.2);
-        
-        setTimeout(() => {
-            if (actx.state !== 'closed') actx.close();
-        }, 300);
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-}
+} // --- playElectronicBlip 終了 ---
 
 function playSignalSound(type) {
     if (isMutedSE) return;
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
+    const actx = getSharedAudioContext(); 
+    if (!actx) return;
     
     try {
-        const actx = new AudioContext();
         const osc = actx.createOscillator();
         const gain = actx.createGain();
         osc.connect(gain);
@@ -943,22 +953,17 @@ function playSignalSound(type) {
         
         osc.start(now);
         osc.stop(now + duration);
-        
-        setTimeout(() => {
-            if (actx.state !== 'closed') actx.close();
-        }, duration * 1000 + 100);
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-}
+} // --- playSignalSound 終了 ---
 
 function playClickSound() {
     if (isMutedSE) return;
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
+    const actx = getSharedAudioContext(); 
+    if (!actx) return;
     
     try {
-        const actx = new AudioContext();
         const osc = actx.createOscillator();
         const gain = actx.createGain();
         osc.type = 'square';
@@ -972,27 +977,21 @@ function playClickSound() {
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
         osc.start(now);
         osc.stop(now + 0.05);
-        
-        setTimeout(() => {
-            if (actx.state !== 'closed') actx.close();
-        }, 150);
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-}
+} // --- playClickSound 終了 ---
 
 function playChurchBell() {
     if (isMutedSE) return;
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
+    const actx = getSharedAudioContext(); 
+    if (!actx) return;
     
     try {
-        const actx = new AudioContext();
         const now = actx.currentTime;
         const vol = seVolume * 0.8;
         const ratios = [1, 2, 3, 4.2, 5.4];
         const baseFreq = 300; 
-        let maxDuration = 0;
         
         ratios.forEach((ratio, index) => {
             const osc = actx.createOscillator();
@@ -1000,7 +999,6 @@ function playChurchBell() {
             osc.type = 'sine';
             osc.frequency.setValueAtTime(baseFreq * ratio, now);
             const duration = 2.5 - (index * 0.4); 
-            if (duration > maxDuration) maxDuration = duration;
             
             osc.connect(gain);
             gain.connect(actx.destination);
@@ -1010,14 +1008,10 @@ function playChurchBell() {
             osc.start(now);
             osc.stop(now + duration);
         });
-        
-        setTimeout(() => {
-            if (actx.state !== 'closed') actx.close();
-        }, maxDuration * 1000 + 100);
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} 
+} // --- playChurchBell 終了 ---
 
 function calculateShortestPath() {
     let startNode = {x: startLeftX, y: startBottomY};
@@ -2623,7 +2617,7 @@ function handleDown(e) {
 
     const pos = getMousePos(e);
     
-    const volAreaX = UI_X - 60; // ★修正: 文字エリアまで含めるために左へ範囲拡大
+    const volAreaX = UI_X - 60; 
     
     if (pos.x >= volAreaX && pos.x <= UI_X + BAR_W + 10) {
         if (pos.x < UI_X && pos.y >= UI_Y_START && pos.y <= UI_Y_START + BAR_H) {
@@ -2843,6 +2837,13 @@ window.addEventListener('keyup', (e) => {
     keys[e.key] = false;
 });
 
+// 修正: フォーカスが外れたら全キー入力をオフにする
+window.addEventListener('blur', () => {
+    for (let k in keys) {
+        keys[k] = false;
+    }
+});
+
 function initPeer(password) {
     if (peer) return;
     isMatching = true;
@@ -2968,7 +2969,7 @@ function setupConnection() {
                     seed: data.seed, 
                     colorIdx: data.colorIdx, 
                     normalIdx: data.normalIdx, 
-                    rageIdx: data.rageIdx,     
+                    rageIdx: data.rageIdx,
                     playCount: data.playCount 
                 });
                 
