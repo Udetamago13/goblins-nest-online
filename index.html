@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.4</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.4.1</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -372,7 +372,6 @@ Object.values(SE).flat().forEach(audio => { audio.preload = 'auto'; });
 
 // ゲーム変数
 let grid = [], floorVariant = [];
-// ★修正: deathDir (死亡時の倒れる向き) を追加
 let player1 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0, deathDir: 0};
 let player2 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0, deathDir: 0};
 let daughter = {x: 0, y: 0, rescued: false, rescuer: null};
@@ -419,21 +418,24 @@ if (safeGetItem('goblinsNest_gatePassed')) {
 }
 
 gatePassInput.addEventListener('input', () => {
+    // 全角変換
     gatePassInput.value = gatePassInput.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
 });
 
 // ゲート通過処理の共通関数
 function attemptGatePass() {
-    if (gatePassInput.value.trim().toLowerCase() === 'cave') {
+    // ★修正: 空白トリムを念入りに行い、小文字化して判定
+    if (gatePassInput.value && gatePassInput.value.trim().toLowerCase() === 'cave') {
+        playClickSound(); // 音を鳴らす (エラーでも処理を止めないようtry-catch内包推奨だが、今回はclose対応で対処)
         gateScreen.style.display = 'none';
         gameState = 'title';
         safeSetItem('goblinsNest_gatePassed', 'true');
-        playClickSound();
         
         // 入力ロック
         isInputLocked = true;
         setTimeout(() => { isInputLocked = false; }, 500);
     } else {
+        // 失敗時フィードバック
         gatePassInput.value = '';
         gateScreen.style.backgroundColor = '#200';
         setTimeout(() => gateScreen.style.backgroundColor = '#000', 100);
@@ -442,9 +444,10 @@ function attemptGatePass() {
 
 gateBtn.addEventListener('click', attemptGatePass);
 
-// Enterキーでも決定可能にする
+// Enterキーでも決定可能にする (IME対応版)
 gatePassInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+    // ★修正: IME変換中のEnterは無視する (!e.isComposing)
+    if (e.key === 'Enter' && !e.isComposing) {
         attemptGatePass();
     }
 });
@@ -496,7 +499,6 @@ function update() {
         greyBGM.volume = 0.4 * realBGMVol * 2.5 * greyVolFactor;
     }
 
-    // ★修正: ゲームオーバー・クリア時は自動キャンセルしない
     if (!isGameOver && !gameCleared && signalState.active && !signalState.agreedTime && performance.now() - signalState.startTime > 3000) {
         signalState.active = false;
         signalState.p1 = false;
@@ -885,99 +887,150 @@ function playSE(audioArrayOrSingle, volumeRatio = 0.6, pitchRand = 0.1, basePitc
     clone.play().catch(() => {});
 }
 
+// ★修正: AudioContextメモリリーク対策 (使い終わったらcloseする)
 function playElectronicBlip() {
     if (isMutedSE) return;
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return;
-    const actx = new AudioContext();
-    const osc = actx.createOscillator();
-    const gain = actx.createGain();
-    osc.type = 'sine';
-    osc.connect(gain);
-    gain.connect(actx.destination);
-    const now = actx.currentTime;
-    osc.frequency.setValueAtTime(1200, now);
-    osc.frequency.exponentialRampToValueAtTime(2000, now + 0.1);
-    const vol = seVolume * 0.5; 
-    gain.gain.setValueAtTime(vol, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-    osc.start(now);
-    osc.stop(now + 0.2);
+    
+    try {
+        const actx = new AudioContext();
+        const osc = actx.createOscillator();
+        const gain = actx.createGain();
+        osc.type = 'sine';
+        osc.connect(gain);
+        gain.connect(actx.destination);
+        const now = actx.currentTime;
+        osc.frequency.setValueAtTime(1200, now);
+        osc.frequency.exponentialRampToValueAtTime(2000, now + 0.1);
+        const vol = seVolume * 0.5; 
+        gain.gain.setValueAtTime(vol, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+        osc.start(now);
+        osc.stop(now + 0.2);
+        
+        // ★重要: 使い終わったContextを破棄
+        setTimeout(() => {
+            if (actx.state !== 'closed') actx.close();
+        }, 300);
+    } catch(e) {
+        console.warn("AudioContext limit reached");
+    }
 }
 
+// ★修正: AudioContextメモリリーク対策
 function playSignalSound(type) {
     if (isMutedSE) return;
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return;
-    const actx = new AudioContext();
-    const osc = actx.createOscillator();
-    const gain = actx.createGain();
-    osc.connect(gain);
-    gain.connect(actx.destination);
-    const now = actx.currentTime;
-    const vol = seVolume * 0.4;
-    if (type === 'R') { 
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(1500, now);
-        osc.frequency.linearRampToValueAtTime(1400, now + 0.6);
-        gain.gain.setValueAtTime(vol * 0.3, now); 
-        gain.gain.linearRampToValueAtTime(0, now + 0.6);
+    
+    try {
+        const actx = new AudioContext();
+        const osc = actx.createOscillator();
+        const gain = actx.createGain();
+        osc.connect(gain);
+        gain.connect(actx.destination);
+        const now = actx.currentTime;
+        const vol = seVolume * 0.4;
+        let duration = 0;
+        
+        if (type === 'R') { 
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1500, now);
+            osc.frequency.linearRampToValueAtTime(1400, now + 0.6);
+            gain.gain.setValueAtTime(vol * 0.3, now); 
+            gain.gain.linearRampToValueAtTime(0, now + 0.6);
+            duration = 0.6;
+        } else if (type === 'W') { 
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(150, now);
+            osc.frequency.linearRampToValueAtTime(100, now + 1.5);
+            gain.gain.setValueAtTime(vol * 0.8, now);
+            gain.gain.linearRampToValueAtTime(0, now + 1.5);
+            duration = 1.5;
+        }
+        
         osc.start(now);
-        osc.stop(now + 0.6);
-    } else if (type === 'W') { 
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(150, now);
-        osc.frequency.linearRampToValueAtTime(100, now + 1.5);
-        gain.gain.setValueAtTime(vol * 0.8, now);
-        gain.gain.linearRampToValueAtTime(0, now + 1.5);
-        osc.start(now);
-        osc.stop(now + 1.5);
+        osc.stop(now + duration);
+        
+        // ★重要: 使い終わったContextを破棄
+        setTimeout(() => {
+            if (actx.state !== 'closed') actx.close();
+        }, duration * 1000 + 100);
+    } catch(e) {
+        console.warn("AudioContext limit reached");
     }
 }
 
+// ★修正: AudioContextメモリリーク対策
 function playClickSound() {
     if (isMutedSE) return;
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return;
-    const actx = new AudioContext();
-    const osc = actx.createOscillator();
-    const gain = actx.createGain();
-    osc.type = 'square';
-    osc.connect(gain);
-    gain.connect(actx.destination);
-    const now = actx.currentTime;
-    const vol = seVolume * 0.5;
-    osc.frequency.setValueAtTime(800, now);
-    osc.frequency.exponentialRampToValueAtTime(100, now + 0.05);
-    gain.gain.setValueAtTime(vol, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
-    osc.start(now);
-    osc.stop(now + 0.05);
+    
+    try {
+        const actx = new AudioContext();
+        const osc = actx.createOscillator();
+        const gain = actx.createGain();
+        osc.type = 'square';
+        osc.connect(gain);
+        gain.connect(actx.destination);
+        const now = actx.currentTime;
+        const vol = seVolume * 0.5;
+        osc.frequency.setValueAtTime(800, now);
+        osc.frequency.exponentialRampToValueAtTime(100, now + 0.05);
+        gain.gain.setValueAtTime(vol, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+        osc.start(now);
+        osc.stop(now + 0.05);
+        
+        // ★重要: 使い終わったContextを破棄
+        setTimeout(() => {
+            if (actx.state !== 'closed') actx.close();
+        }, 150);
+    } catch(e) {
+        console.warn("AudioContext limit reached");
+    }
 }
 
+// ★修正: AudioContextメモリリーク対策
 function playChurchBell() {
     if (isMutedSE) return;
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return;
-    const actx = new AudioContext();
-    const now = actx.currentTime;
-    const vol = seVolume * 0.8;
-    const ratios = [1, 2, 3, 4.2, 5.4];
-    const baseFreq = 300; 
-    ratios.forEach((ratio, index) => {
-        const osc = actx.createOscillator();
-        const gain = actx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(baseFreq * ratio, now);
-        const duration = 2.5 - (index * 0.4); 
-        osc.connect(gain);
-        gain.connect(actx.destination);
-        gain.gain.setValueAtTime(0, now);
-        gain.gain.linearRampToValueAtTime(vol / (index + 1), now + 0.05);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-        osc.start(now);
-        osc.stop(now + duration);
-    });
+    
+    try {
+        const actx = new AudioContext();
+        const now = actx.currentTime;
+        const vol = seVolume * 0.8;
+        const ratios = [1, 2, 3, 4.2, 5.4];
+        const baseFreq = 300; 
+        let maxDuration = 0;
+        
+        ratios.forEach((ratio, index) => {
+            const osc = actx.createOscillator();
+            const gain = actx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(baseFreq * ratio, now);
+            const duration = 2.5 - (index * 0.4); 
+            if (duration > maxDuration) maxDuration = duration;
+            
+            osc.connect(gain);
+            gain.connect(actx.destination);
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(vol / (index + 1), now + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            osc.start(now);
+            osc.stop(now + duration);
+        });
+        
+        // ★重要: 使い終わったContextを破棄
+        setTimeout(() => {
+            if (actx.state !== 'closed') actx.close();
+        }, maxDuration * 1000 + 100);
+    } catch(e) {
+        console.warn("AudioContext limit reached");
+    }
 } // --- playChurchBell 終了 ---
 
 function calculateShortestPath() {
@@ -1248,7 +1301,6 @@ function generateDungeon() {
     p1LastHitTime = 0; p2LastHitTime = 0; 
     player1.hitShakeTime = 0; player2.hitShakeTime = 0;
     player1.stepCount = 0; player2.stepCount = 0;
-    // ★修正: 死亡時パラメータリセット
     player1.deathDir = 0; player2.deathDir = 0;
     
     for(let y=0; y<GRID_H; y++) {
@@ -1407,7 +1459,7 @@ function gameLoopStep() {
                     if (Math.abs(p.x - a.x) <= 1 && Math.abs(p.y - a.y) <= 1) {
                         hpP1 = 0; hpP2 = 0; 
                         if (!isDebugMode && !isGameOver && !gameCleared) {
-                            damagePlayer(p, 100); // ★修正: damagePlayerを呼んで死亡処理を統一
+                            damagePlayer(p, 100); 
                         }
                     }
                 });
@@ -1852,11 +1904,9 @@ function damagePlayer(p, amount) {
         });
     }
 
-    // ★修正: 死亡判定 (連帯責任・死体生成)
     if (hpP1 <= 0 || hpP2 <= 0) {
         if (!isDebugMode && !isGameOver && !gameCleared) {
             isGameOver = true; timerStopped = true;
-            // 両者に死亡方向を割り当て (倒れる用)
             player1.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
             player2.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
             
@@ -1866,7 +1916,6 @@ function damagePlayer(p, amount) {
 } // --- damagePlayer 終了 ---
 
 function movePlayer(p, dx, dy) {
-    // ★修正: ゲームオーバー・クリア時の移動禁止 (デバッグモード除く)
     if (!isDebugMode && (isGameOver || gameCleared)) return;
 
     if (dx === 0 && dy === -1) p.facing = 0;
@@ -1903,7 +1952,6 @@ function movePlayer(p, dx, dy) {
 
 function playerAttack(p) {
     if (!isDebugMode && daughter.rescued && daughter.rescuer === (p === player1 ? 'p1' : 'p2')) return;
-    // ★修正: ゲームオーバー時は攻撃不可
     if (!isDebugMode && (isGameOver || gameCleared)) return;
 
     const now = performance.now();
@@ -1965,7 +2013,6 @@ function checkClear() {
             clearBGM.loop = true; 
             clearBGM.play().catch(()=>{});
         }
-        // ★修正: クリア時も即座に結果画面・移動禁止
         showResult();
     }
 } // --- checkClear 終了 ---
@@ -2149,24 +2196,19 @@ function drawGameScreen() {
 
     [player1, player2].forEach(p => {
         const isP2 = p === player2;
-        // ★修正: ゲームオーバー時、両方シルエット化
         const isDead = isGameOver; 
         const shake = (now - p.hitShakeTime < HIT_SHAKE_DURATION) ? (rnd.nextFloat()*6-3) : 0; 
         
         let img = playerImages.front;
         let sx = 1;
         
-        // ★修正: 死亡時のレンダリング（黒シルエット & 90度回転 & フェードなし）
         if (isGameOver && !isDebugMode) {
-             // 死亡時 (全身黒シルエット)
              let rot = (Math.PI / 2) * (p.deathDir || 1); 
              ctx.save();
-             // フィルターで真っ黒に
              drawSprite(playerImages.side, p.x, p.y, 1, 1, 0, 'brightness(0)', rot, 5);
              ctx.restore();
         } 
         else {
-            // 通常時 or クリア時
             if (p.facing === 0) { 
                 img = playerImages.back; if (p.stepCount % 2 !== 0) sx = -1;
             }
@@ -2202,7 +2244,7 @@ function drawGameScreen() {
                 }
             }
 
-            if (label && !isGameOver) { // 死体には名前を出さない
+            if (label && !isGameOver) { 
                 ctx.save();
                 const nameDx = (p.x - vx) * SCALED_TILE + SCALED_TILE/2;
                 const nameDy = (p.y - vy) * SCALED_TILE - 15 + shake;
@@ -2284,28 +2326,20 @@ function drawGameScreen() {
         let msg = "";
         
         if (gameCleared) {
-            // ★修正: クリア時
             if (signalState.type === 'R') msg = "続行の合図だ！(R)";
             else if (signalState.type === 'W') msg = "帰還の合図だ！(W)";
         } else if (isGameOver) {
-            // ★修正: ゲームオーバー時
             if (signalState.type === 'R') msg = "再起の合図だ！(R)";
             else if (signalState.type === 'W') msg = "帰還の合図だ！(W)";
         } else {
-            // プレイ中
             if (signalState.type === 'R') msg = "撤退の合図だ！(R)";
         }
         
-        // ★修正: 待機状態(片方点灯)の表示
         if (msg) {
             signalMsgEl.innerText = msg;
             signalMsgEl.style.opacity = 1;
             
-            // 自分か相手が押しているか
-            let waiting = false;
-            // 待機中かどうかを文字色や枠線で表現
             if (signalState.p1 || signalState.p2) {
-                 // 片方が待機中
                  signalMsgEl.style.borderColor = "#0ff";
             }
 
@@ -2317,7 +2351,6 @@ function drawGameScreen() {
                 signalMsgEl.style.borderColor = "rgba(255,255,255,0.5)";
             }
             
-            // 永続待機の場合の補助テキスト
             if ((isGameOver || gameCleared) && !signalState.agreedTime) {
                 if ((isHost && signalState.p1) || (!isHost && signalState.p2)) {
                     signalMsgEl.innerText += "\n(待機中...)";
@@ -2728,7 +2761,6 @@ const keys = {};
 window.addEventListener('keydown', (e) => {
     keys[e.key] = true;
     if (gameState === 'game') {
-        // ★修正: R/Wキーの仕様変更 (Toggle化)
         if (e.key === 'r' || e.key === 'R') {
             if (!isDebugMode) {
                 if (isGameOver || gameCleared) {
@@ -2781,4 +2813,237 @@ window.addEventListener('keydown', (e) => {
         }
 
         // 移動・攻撃 (デバッグ以外、ゲームオーバー/クリア時は無効)
-        if (isHost
+        if (isHost || isDebugMode) {
+            if (!isDebugMode && (isGameOver || gameCleared)) return; // ★操作禁止
+
+            let dx = 0, dy = 0;
+            if (keys['ArrowUp']) dy = -1;
+            else if (keys['ArrowDown']) dy = 1;
+            else if (keys['ArrowLeft']) dx = -1;
+            else if (keys['ArrowRight']) dx = 1;
+            
+            if (dx !== 0 || dy !== 0) movePlayer(player1, dx, dy);
+            if (keys['z'] || keys['Z']) playerAttack(player1);
+
+            // デバッグ用: P2操作
+            if (isDebugMode) {
+                let d2x = 0, d2y = 0;
+                if (keys['w'] || keys['W']) d2y = -1;
+                else if (keys['s'] || keys['S']) d2y = 1;
+                else if (keys['a'] || keys['A']) d2x = -1;
+                else if (keys['d'] || keys['D']) d2x = 1;
+                if (d2x !== 0 || d2y !== 0) movePlayer(player2, d2x, d2y);
+                if (keys['x'] || keys['X']) playerAttack(player2);
+            }
+        } else {
+            // Guest -> Host
+            if (isGameOver || gameCleared) return; // ★操作禁止
+
+            let dx = 0, dy = 0;
+            if (keys['ArrowUp']) dy = -1;
+            else if (keys['ArrowDown']) dy = 1;
+            else if (keys['ArrowLeft']) dx = -1;
+            else if (keys['ArrowRight']) dx = 1;
+
+            if (dx !== 0 || dy !== 0) {
+                if (conn && conn.open) conn.send({ type: 'MOVE', dx: dx, dy: dy });
+            }
+            if (keys['z'] || keys['Z']) {
+                if (conn && conn.open) conn.send({ type: 'ATTACK' });
+            }
+        }
+    } else if (gameState === 'title') {
+        if(e.key === 'Enter') {
+             // 入力ロック中なら反応しない
+             if (isInputLocked) return;
+             
+             gameState='matching'; 
+             titleBGM.play().catch(()=>{});
+        }
+    }
+});
+
+window.addEventListener('keyup', (e) => {
+    keys[e.key] = false;
+});
+
+// PeerJS初期化
+function initPeer(password) {
+    if (peer) return;
+    isMatching = true;
+    
+    // PeerID生成 (Beta2用Prefix)
+    const myId = PEER_ID_PREFIX + hashCode(password); 
+    
+    peer = new Peer(null, { debug: 1 }); 
+
+    peer.on('open', (id) => {
+        // ホストとして接続試行
+        tryConnectAsHost(myId);
+    });
+
+    peer.on('error', (err) => {
+        console.log("Peer Error: ", err);
+        // IDが取れない(=誰かが既にHostとして待機中) -> Guestとして接続へ
+        if (err.type === 'unavailable-id') {
+            connectAsGuest(myId);
+        } else {
+            isMatching = false;
+            alert("通信エラーが発生しました。合言葉を変えて試してください。");
+        }
+    });
+}
+
+// 自分がHostになろうとする
+function tryConnectAsHost(baseId) {
+    const hostId = baseId + "_HOST";
+    // 一旦破棄してID指定で作り直す
+    if(peer) peer.destroy();
+    
+    peer = new Peer(hostId, { debug: 1 });
+    
+    peer.on('open', (id) => {
+        isHost = true;
+        // 接続待ち
+        peer.on('connection', (c) => {
+            if (conn) { c.close(); return; } // 1対1のみ
+            conn = c;
+            setupConnection();
+        });
+    });
+    
+    peer.on('error', (err) => {
+        if (err.type === 'unavailable-id') {
+            // Hostが既にいる -> Guestになる
+            connectAsGuest(baseId);
+        }
+    });
+}
+
+function connectAsGuest(baseId) {
+    const hostId = baseId + "_HOST";
+    // 自分のIDはランダムで良い
+    if(peer) peer.destroy();
+    peer = new Peer(null, {debug: 1});
+    
+    peer.on('open', () => {
+        isHost = false;
+        conn = peer.connect(hostId);
+        if(!conn) { alert("ホストが見つかりません"); isMatching=false; return; }
+        setupConnection();
+    });
+}
+
+function setupConnection() {
+    conn.on('open', () => {
+        isConnected = true;
+        isMatching = false; // 待機終了
+        // ★接続時に名前を送る (Guest -> Host)
+        if (!isHost) {
+            conn.send({ type: 'NAME', name: nameEl.value });
+        }
+    });
+    
+    conn.on('data', (data) => {
+        if (isHost) {
+            // --- Host受信 ---
+            if (data.type === 'MOVE') {
+                guestInputState.dx = data.dx;
+                guestInputState.dy = data.dy;
+            } else if (data.type === 'ATTACK') {
+                guestInputState.attack = true;
+            } else if (data.type === 'SIGNAL') {
+                // ★修正: トグル処理の受信
+                if (isGameOver || gameCleared) {
+                    signalState.active = true;
+                    signalState.type = data.key;
+                    signalState.p2 = !signalState.p2; 
+                } else {
+                    signalState.active = true;
+                    signalState.type = data.key;
+                    if (!signalState.startTime) signalState.startTime = performance.now();
+                    signalState.p2 = true; 
+                }
+                playSignalSound(data.key);
+            }
+            // ★名前受信
+            else if (data.type === 'NAME') {
+                otherPlayerName = data.name;
+            }
+        } else {
+            // --- Guest受信 ---
+            if (data.type === 'SYNC') {
+                // 完全同期
+                player1.x = data.p1.x; player1.y = data.p1.y; player1.facing = data.p1.f; player1.stepCount = data.p1.sc;
+                player2.x = data.p2.x; player2.y = data.p2.y; player2.facing = data.p2.f; player2.stepCount = data.p2.sc;
+                hpP1 = data.hp.p1; hpP2 = data.hp.p2;
+                daughter.x = data.d.x; daughter.y = data.d.y; daughter.rescued = data.d.r; daughter.rescuer = data.d.er;
+                
+                // Goblin同期 (簡易)
+                // 本来はID管理すべきだが、配列順序が同じ前提
+                if (goblins.length !== data.g.length) goblins = new Array(data.g.length).fill({});
+                data.g.forEach((gData, i) => {
+                      goblins[i] = {
+                          x: gData.x, y: gData.y, facing: gData.f, state: gData.s, hp: gData.hp,
+                          sizeScale: gData.sc, bobOffset: gData.bo, 
+                          deathTime: gData.dt, deathAngle: gData.da, dissolveProgress: gData.dp,
+                          isCasting: gData.ic
+                      };
+                });
+                
+                signalState = data.sig;
+                fixedTime = data.t;
+                gameCleared = data.cl;
+                isGameOver = data.go;
+                isGreyMode = data.gm;
+                
+                // ★ホスト名同期
+                otherPlayerName = data.hn;
+
+                // ゲスト側の視界用
+                updateInputPosition();
+
+            } else if (data.type === 'START') {
+                // ゲーム開始シグナル (ホストの独裁決定を受け取る)
+                // seed, colorIdx, bgmIdxを受け取り、ゲスト側で計算せずに適用する
+                startDungeonGame(false, { 
+                    seed: data.seed, 
+                    colorIdx: data.colorIdx, 
+                    bgmIdx: data.bgmIdx,
+                    playCount: data.playCount
+                });
+                
+            } else if (data.type === 'SPAWN_EFFECT') {
+                // エフェクト発生
+                if (data.kind === 'goblin') {
+                      attackEffects.push({
+                         x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
+                      });
+                      const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); // 簡易
+                      playSE(SE.goblinAttack, 0.7, 0.15, pitch);
+                } else if (data.kind === 'player') {
+                      attackEffects.push({
+                         x: data.x, y: data.y, type: 'player', owner: data.owner, dir: data.dir, startTime: performance.now(), duration: 100
+                      });
+                      playSE(data.owner==='p1'?SE.playerAttack1:SE.playerAttack2, 0.5, 0.05);
+                }
+            } else if (data.type === 'PLAYER_HIT') {
+                const p = data.target === 'p1' ? player1 : player2;
+                p.hitShakeTime = performance.now();
+                playSE(data.target==='p1'?SE.playerHit1:SE.playerHit2, 0.9, 0.05);
+            } else if (data.type === 'GO_TITLE') {
+                location.reload();
+            }
+        }
+    });
+
+    conn.on('close', () => {
+        alert("相手との接続が切れました");
+        location.reload();
+    });
+}
+
+update();
+</script>
+</body>
+</html>
