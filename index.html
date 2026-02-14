@@ -148,7 +148,7 @@ function hashCode(str) {
     return Math.abs(hash) + 1;
 }
 
-// --- グローバル変数 (定義順序修正版) ---
+// --- グローバル変数 ---
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const nameEl = document.getElementById('nameInput');
@@ -165,14 +165,6 @@ const gateBtn = document.getElementById('gate-btn');
 
 let rnd = new Xorshift(); 
 
-// ★重要: 変数定義を先に持ってくる（エラー回避）
-let isGreyMode = false;
-let isDebugMode = false; 
-let gameState = 'gate'; 
-let isDraggingBGM = false;
-let isDraggingSE = false;
-let isDraggingBright = false; 
-
 // ローカルストレージ読み込み
 let savedBgm = localStorage.getItem('goblinsNest_bgmVol');
 let bgmVolume = savedBgm !== null ? parseFloat(savedBgm) : 0.5;
@@ -180,20 +172,6 @@ let savedSe = localStorage.getItem('goblinsNest_seVol');
 let seVolume = savedSe !== null ? parseFloat(savedSe) : 0.5;
 let savedBright = localStorage.getItem('goblinsNest_bright');
 let brightnessLevel = savedBright !== null ? parseFloat(savedBright) : 0.5; 
-
-// ★関数定義（明度更新）
-function updateBrightnessFilter() {
-    const bVal = 0.6 + (brightnessLevel * 0.8);
-    canvas.style.setProperty('--bright', bVal.toFixed(2));
-    if (!isGreyMode) {
-        canvas.style.filter = `brightness(${bVal.toFixed(2)})`;
-    } else {
-        canvas.style.filter = ""; 
-    }
-}
-
-// ★ここで実行（変数が定義された後なのでエラーにならない）
-updateBrightnessFilter();
 
 let isMutedBGM = localStorage.getItem('goblinsNest_muteBGM') === 'true';
 let isMutedSE = localStorage.getItem('goblinsNest_muteSE') === 'true';
@@ -205,6 +183,11 @@ const VIRTUAL_WIDTH = 1024;
 const VIRTUAL_HEIGHT = 576;
 canvas.width = VIRTUAL_WIDTH;
 canvas.height = VIRTUAL_HEIGHT;
+
+let gameState = 'gate'; 
+let isDraggingBGM = false;
+let isDraggingSE = false;
+let isDraggingBright = false; 
 
 // --- 通信・マッチング関連 ---
 const PEER_ID_PREFIX = 'gn_beta1_'; 
@@ -218,6 +201,8 @@ let guestInputState = { dx: 0, dy: 0, attack: false };
 let p1Name = "Player1";
 let p2Name = "Player2";
 
+let isGreyMode = false;
+let isDebugMode = false; 
 let psychicArrays = []; 
 let currentBgmDebugName = ""; 
 
@@ -416,6 +401,16 @@ gateBtn.addEventListener('click', () => {
         setTimeout(() => gateScreen.style.backgroundColor = '#000', 100);
     }
 });
+
+function updateBrightnessFilter() {
+    const bVal = 0.6 + (brightnessLevel * 0.8);
+    canvas.style.setProperty('--bright', bVal.toFixed(2));
+    if (!isGreyMode) {
+        canvas.style.filter = `brightness(${bVal.toFixed(2)})`;
+    } else {
+        canvas.style.filter = ""; 
+    }
+}
 
 function update() {
     if (gameState === 'gate') {
@@ -642,7 +637,6 @@ function drawMatchingScreen() {
     ctx.fillStyle = "rgba(0, 0, 0, 0.85)"; ctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
     ctx.fillStyle = "white"; ctx.textAlign = "center";
     
-    // ★修正: 文字位置のベースライン設定
     ctx.textBaseline = "middle";
 
     ctx.font = "28px 'DotGothic16'";
@@ -2816,6 +2810,9 @@ function setupConnection() {
         location.reload();
     });
 }
+
+// ★修正: 明度フィルター適用をここに移動（すべての変数が定義された後）
+updateBrightnessFilter();
 
 update();
 </script>
