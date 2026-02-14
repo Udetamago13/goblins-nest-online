@@ -70,7 +70,7 @@
         #info-panel { 
             position: absolute; top: 10px; left: 10px; color: #0f0; font-size: 14px; 
             padding: 10px; background: rgba(0,0,0,0.7); border-radius: 8px; line-height: 1.6; 
-            display: none; 
+            display: none; white-space: pre-wrap;
         }
         #signal-message {
             position: absolute; top: 35%; left: 50%; transform: translate(-50%, -50%);
@@ -204,6 +204,7 @@ let p2Name = "Player2";
 let isGreyMode = false;
 let isDebugMode = false; 
 let psychicArrays = []; 
+let currentBgmDebugName = ""; // デバッグ表示用BGM名
 
 const BAR_W = 80, BAR_H = 15;
 const UI_X = VIRTUAL_WIDTH - (BAR_W + 20), UI_Y_START = 30;
@@ -286,8 +287,13 @@ FLOOR_COLORS_56.push("#c0c0c0"); // 53: Silver
 FLOOR_COLORS_56.push("#cd7f32"); // 54: Bronze
 FLOOR_COLORS_56.push("#e5e4e2"); // 55: Platinum
 
-const NORMAL_BGMS_56 = Array.from({length: 56}, (_, i) => `assets/bgm/normal_${i+1}.mp3`);
-const RAGE_BGMS_56 = Array.from({length: 56}, (_, i) => `assets/bgm/rage_${i+1}.mp3`);
+// ★修正: BGM配列生成を安全な記述に変更
+const NORMAL_BGMS_56 = [];
+const RAGE_BGMS_56 = [];
+for(let i=0; i<56; i++) {
+    NORMAL_BGMS_56.push("assets/bgm/normal_" + (i+1) + ".mp3");
+    RAGE_BGMS_56.push("assets/bgm/rage_" + (i+1) + ".mp3");
+}
 
 // --- ★デッキシステム用: グローバル変数 ---
 // ホストのみが管理する「山札」
@@ -574,6 +580,19 @@ function updateInputPosition() {
 }
 
 function draw() {
+    // --- ★修正: 明度フィルターを全画面に適用 ---
+    // ここでcanvas.style.filterを設定することで、タイトルやマッチング画面にも反映される。
+    // 黒(RGB 0,0,0)は brightness(1.5) 倍しても 0 のままなので、暗闇は見えない。安心。
+    const bVal = 0.6 + (brightnessLevel * 0.8);
+    let filterStr = `brightness(${bVal.toFixed(2)})`;
+
+    if (isGreyMode) {
+        const hueShift = Math.sin(performance.now() / 1000) * 15;
+        filterStr += ` saturate(1.2) hue-rotate(${hueShift}deg) contrast(1.1)`;
+    }
+    canvas.style.filter = filterStr;
+
+
     ctx.clearRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
     if (gameState === 'game') {
         drawGameScreen();
@@ -714,9 +733,15 @@ function initDecks() {
 
     // セッションにデータが残っていて、かつ有効ならロード
     if (storedColor && storedBgm && storedIdx !== null) {
-        deckColorIndices = JSON.parse(storedColor);
-        deckBgmIndices = JSON.parse(storedBgm);
-        currentDeckIndex = parseInt(storedIdx);
+        try {
+            deckColorIndices = JSON.parse(storedColor);
+            deckBgmIndices = JSON.parse(storedBgm);
+            currentDeckIndex = parseInt(storedIdx);
+        } catch(e) {
+            console.error("Session load error", e);
+            generateNewDeck();
+            return;
+        }
         
         // 万が一空の場合は生成し直し
         if (deckColorIndices.length !== 56 || deckBgmIndices.length !== 56) {
@@ -777,11 +802,14 @@ function playAndFadeIn(srcOrAudio, targetVolRatio, fadeDuration = 600) {
     stopCurrentBgm(); // 前の曲を完全に止める
     
     let audio;
+    let srcName = "";
     if (typeof srcOrAudio === 'string') {
         audio = new Audio(srcOrAudio);
+        srcName = srcOrAudio;
     } else {
         audio = srcOrAudio;
         audio.currentTime = 0;
+        srcName = "Object(Grey?)";
     }
     audio.loop = true; 
     
@@ -790,9 +818,22 @@ function playAndFadeIn(srcOrAudio, targetVolRatio, fadeDuration = 600) {
     const targetVolume = targetVolRatio * realBGMVol * 2.5; 
     audio.volume = targetVolume;
     
-    audio.play().catch((e) => { console.log("BGM Play Error:", e); });
+    // ★修正: 再生エラー時のデバッグ表示
+    audio.play().catch((e) => { 
+        console.log("BGM Play Error:", e); 
+        if(isDebugMode) {
+             currentBgmDebugName += "\n[ERR] " + srcName;
+             updateInfoText();
+        }
+    });
     
-    if (typeof srcOrAudio === 'string') currentAudio = audio;
+    if (typeof srcOrAudio === 'string') {
+        currentAudio = audio;
+        if(isDebugMode) {
+             currentBgmDebugName = "Playing: " + srcName;
+             updateInfoText();
+        }
+    }
 }
 
 function playNormalBgm() { 
@@ -1009,6 +1050,8 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     
     if (isDebugMode) {
         infoPanel.style.display = 'block';
+        // ★修正: デバッグ情報初期化
+        currentBgmDebugName = ""; 
     } else {
         infoPanel.style.display = 'none';
     }
@@ -1027,6 +1070,12 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     }
 
     generateDungeon();
+}
+
+// デバッグ用情報更新
+function updateInfoText() {
+    if (!isDebugMode) return;
+    infoPanel.innerText = `Deck: ${currentDeckIndex}/56\nColorIdx: ${deckColorIndices[currentDeckIndex-1]}\nBgmIdx: ${deckBgmIndices[currentDeckIndex-1]}\nPlayCount: ${playCount}\n${currentBgmDebugName}`;
 }
 
 function isPathValid() {
@@ -1952,14 +2001,8 @@ function showResult() {
 } // --- showResult終了 ---
 
 function drawGameScreen() {
-    const bVal = 0.6 + (brightnessLevel * 0.8);
-    let filterStr = `brightness(${bVal.toFixed(2)})`;
-
-    if (isGreyMode) {
-        const hueShift = Math.sin(performance.now() / 1000) * 15;
-        filterStr += ` saturate(1.2) hue-rotate(${hueShift}deg) contrast(1.1)`;
-    }
-    canvas.style.filter = filterStr;
+    // --- ★修正: 描画順序を修正してfilterはdraw()で一括適用 ---
+    // ここにあった filter 設定は draw() に移動済み
 
     ctx.fillStyle = "#111"; ctx.fillRect(0,0,VIRTUAL_WIDTH,VIRTUAL_HEIGHT);
     
@@ -2709,14 +2752,6 @@ function initPeer(password) {
 
     peer.on('open', (id) => {
         // ホストとして接続試行
-        // もし既に同名のPeerID(ホスト)が存在する場合、エラーになるので、その場合はGuestとして接続するロジックが必要だが、
-        // PeerJSは同名IDでのnew Peerをエラーにするか、上書きするか挙動が不安定。
-        // ここでは「自分のID」ではなく、「相手のID」を指定してconnectする。
-        // ★修正: 簡易マッチングロジック
-        // 合言葉のハッシュを使って、Hostは "Prefix_Hash_H", Guestは "Prefix_Hash_G" とするのはP2Pの基本だが、
-        // 今回は「先に待機したもん勝ち」仕様。
-        // PeerJSの共有サーバーで、特定のIDが取れるか試す。
-        
         tryConnectAsHost(myId);
     });
 
@@ -2776,7 +2811,6 @@ function setupConnection() {
     conn.on('open', () => {
         isConnected = true;
         isMatching = false; // 待機終了
-        
         // HostならGuestの名前を取得したいが、まずは接続確立
     });
     
