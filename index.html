@@ -41,7 +41,6 @@
             50% { filter: brightness(var(--bright)) saturate(1.2) hue-rotate(15deg) contrast(1.1); }
             100% { filter: brightness(var(--bright)) saturate(1.2) hue-rotate(-15deg) contrast(1.1); }
         }
-        /* CSSアニメーション側で明度変数を受け取る設定 */
         .grey-mode-canvas {
             animation: greyTrip 5s infinite ease-in-out;
         }
@@ -49,7 +48,6 @@
         canvas { 
             display: block;
             image-rendering: pixelated; 
-            /* デフォルトの明るさ変数 */
             --bright: 1.0; 
         }
         .game-input-area {
@@ -173,8 +171,7 @@ let bgmVolume = savedBgm !== null ? parseFloat(savedBgm) : 0.5;
 let savedSe = localStorage.getItem('goblinsNest_seVol');
 let seVolume = savedSe !== null ? parseFloat(savedSe) : 0.5;
 let savedBright = localStorage.getItem('goblinsNest_bright');
-let brightnessLevel = savedBright !== null ? parseFloat(savedBright) : 0.5; // 0.0 ~ 1.0 (0.5=Default)
-// 明度の初期適用
+let brightnessLevel = savedBright !== null ? parseFloat(savedBright) : 0.5; 
 updateBrightnessFilter();
 
 let isMutedBGM = localStorage.getItem('goblinsNest_muteBGM') === 'true';
@@ -191,7 +188,7 @@ canvas.height = VIRTUAL_HEIGHT;
 let gameState = 'gate'; 
 let isDraggingBGM = false;
 let isDraggingSE = false;
-let isDraggingBright = false; // 明度バー操作フラグ
+let isDraggingBright = false;
 
 // --- 通信・マッチング関連 ---
 const PEER_ID_PREFIX = 'gn_beta1_'; 
@@ -202,7 +199,6 @@ let isConnected = false;
 let isHost = false; 
 let guestInputState = { dx: 0, dy: 0, attack: false }; 
 
-// 名前同期用変数
 let p1Name = "Player1";
 let p2Name = "Player2";
 
@@ -237,7 +233,6 @@ const IDLE_COOLDOWN = 2000;
 const CHASE_COOLDOWN = 1000;
 const GOBLIN_ATTACK_INTERVAL = 650;
 const GREY_ARRAY_COOLDOWN = 3000; 
-// ★修正: 激昂速度アップ (400 -> 180) 約2.2倍速
 const RAGE_COOLDOWN = 180;
 const GOBLIN_LOOK_INTERVAL = 300;
 const GOBLIN_UPDATE_INTERVAL = 80;
@@ -278,7 +273,7 @@ dgGrad.addColorStop(0.8, "rgba(0, 0, 0, 0)");
 dgCtx.fillStyle = dgGrad;
 dgCtx.beginPath(); dgCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); dgCtx.fill();
 
-// --- ★デッキシステム用: アセット配列定義 (56種) ---
+// アセット配列
 const FLOOR_COLORS_56 = [];
 for(let i=0; i<50; i++) {
     const hue = (i * 137.5) % 360; 
@@ -300,19 +295,15 @@ for(let i=0; i<56; i++) {
     RAGE_BGMS_56.push("assets/bgm/rage_" + (i+1) + ".mp3");
 }
 
-// --- ★デッキシステム用: グローバル変数 ---
-// ホストのみが管理する「山札」
 let deckColorIndices = [];
 let deckBgmIndices = [];
 let currentDeckIndex = 0;
 
-// ★セッションストレージ用キー（デッキ・プレイ回数の永続化）
 const S_KEY_DECK_COLOR = 'gn_deck_color';
 const S_KEY_DECK_BGM = 'gn_deck_bgm';
 const S_KEY_DECK_IDX = 'gn_deck_idx';
 const S_KEY_PLAY_COUNT = 'gn_play_count';
 
-// プレイ回数の初期化（セッションから読み込み）
 let playCount = parseInt(sessionStorage.getItem(S_KEY_PLAY_COUNT) || '0');
 
 let currentStageColor = null;
@@ -353,7 +344,6 @@ const SE = {
 };
 Object.values(SE).flat().forEach(audio => { audio.preload = 'auto'; });
 
-// ゲーム変数
 let grid = [], floorVariant = [];
 let player1 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0};
 let player2 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0};
@@ -384,28 +374,26 @@ let minimapFloorCtx = minimapFloorCanvas.getContext('2d');
 let minimapFloorDrawn = false;
 let lastMinimapUpdate = 0;
 
-// --- 合図システム状態（合意制） ---
-let signalState = { 
-    active: false, 
-    type: null, // 'R' or 'W'
-    p1: false,  
-    p2: false,  
-    startTime: 0,
-    agreedTime: 0 // 合意成立時刻 (2秒待機用)
-};
-
 // --- 入場ゲート処理 ---
 if (localStorage.getItem('goblinsNest_gatePassed')) {
     gateScreen.style.display = 'none';
     gameState = 'title';
 }
 
+// ★修正: Enterキーでもログイン可能にする
+gatePassInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        gateBtn.click();
+    }
+});
+
 gatePassInput.addEventListener('input', () => {
     gatePassInput.value = gatePassInput.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
 });
 
 gateBtn.addEventListener('click', () => {
-    if (gatePassInput.value.toLowerCase() === 'cave') {
+    // ★修正: 空白除去して判定 (.trim())
+    if (gatePassInput.value.trim().toLowerCase() === 'cave') {
         gateScreen.style.display = 'none';
         gameState = 'title';
         localStorage.setItem('goblinsNest_gatePassed', 'true');
@@ -417,17 +405,12 @@ gateBtn.addEventListener('click', () => {
     }
 });
 
-// ★軽量化: 明度変更は必要な時だけ実行
 function updateBrightnessFilter() {
     const bVal = 0.6 + (brightnessLevel * 0.8);
-    // CSS変数 --bright を更新するだけ（計算はGPUがやる）
     canvas.style.setProperty('--bright', bVal.toFixed(2));
-    
-    // 通常モードの場合はCSS変数更新だけでは反映されない場合があるので念のためfilterも設定
     if (!isGreyMode) {
         canvas.style.filter = `brightness(${bVal.toFixed(2)})`;
     } else {
-        // グレイモード時はCSSアニメーションが支配しているのでfilter直接指定は消す
         canvas.style.filter = ""; 
     }
 }
@@ -438,14 +421,12 @@ function update() {
         return;
     }
 
-    // ミュート状態を反映して音量設定
     const realBGMVol = isMutedBGM ? 0 : bgmVolume;
     const realSEVol = isMutedSE ? 0 : seVolume;
 
     if(titleBGM) titleBGM.volume = realBGMVol;
     if(clearBGM) clearBGM.volume = realBGMVol;
     
-    // BGMボリューム更新 (フェード中以外)
     if(currentAudio && !fadeInterval) currentAudio.volume = (currentMusicState==='rage' ? 0.5 : 0.4) * realBGMVol * 2.5;
     
     if(greyBGM) {
@@ -470,7 +451,6 @@ function update() {
         greyBGM.volume = 0.4 * realBGMVol * 2.5 * greyVolFactor;
     }
 
-    // 合図の時間切れリセット
     if (signalState.active && !signalState.agreedTime && performance.now() - signalState.startTime > 3000) {
         signalState.active = false;
         signalState.p1 = false;
@@ -480,27 +460,21 @@ function update() {
 
     updateInputPosition(); 
     
-    // --- オンライン同期ロジック ---
     if (gameState === 'game') {
         if (!isDebugMode) { 
             if (isHost) {
-                // ホスト: P2の入力反映
                 if (guestInputState.dx !== 0 || guestInputState.dy !== 0) {
                     movePlayer(player2, guestInputState.dx, guestInputState.dy);
                     guestInputState.dx = 0; guestInputState.dy = 0; 
                 }
-                
                 if (guestInputState.attack) {
                     playerAttack(player2);
                     guestInputState.attack = false;
                 }
-
-                // ★合図の合意判定（ホストのみ実行）
                 if (signalState.active && signalState.p1 && signalState.p2) {
                     if (!signalState.agreedTime) {
-                        signalState.agreedTime = performance.now(); // 合意成立時刻を記録
+                        signalState.agreedTime = performance.now(); 
                     } else {
-                        // 2秒経過したら実行
                         if (performance.now() - signalState.agreedTime > 2000) {
                             if (signalState.type === 'R') {
                                 startDungeonGame(false); 
@@ -511,9 +485,7 @@ function update() {
                         }
                     }
                 }
-
                 gameLoopStep(); 
-
                 if (conn && conn.open) {
                     const state = {
                         type: 'SYNC',
@@ -540,7 +512,6 @@ function update() {
             gameLoopStep();
         }
     }
-
     draw(); 
     requestAnimationFrame(update);
 }
@@ -610,14 +581,12 @@ function draw() {
         else if (gameState === 'matching') drawMatchingScreen();
     }
     
-    // UIバーの描画
     drawTriangleVolumeBar("BGM", UI_Y_START, bgmVolume, "#00ff00", isMutedBGM);
     drawTriangleVolumeBar("SE", UI_Y_START + 35, seVolume, "#00ff00", isMutedSE);
     drawTriangleVolumeBar("Light", UI_Y_START + 70, brightnessLevel, "#ffff00", false);
 }
 
 function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
-    // 文字描画
     ctx.fillStyle = "white"; 
     ctx.font = "14px 'DotGothic16'"; 
     ctx.textAlign = "right";
@@ -626,7 +595,6 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
     const textY = y + BAR_H/2;
     ctx.fillText(label, textX, textY);
 
-    // ミュート時の赤線
     if (isMuted) {
         const textWidth = ctx.measureText(label).width;
         ctx.strokeStyle = "red";
@@ -637,7 +605,6 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
         ctx.stroke();
     }
 
-    // バー枠線
     ctx.beginPath();
     ctx.moveTo(UI_X, y + BAR_H); 
     ctx.lineTo(UI_X + BAR_W, y); 
@@ -647,7 +614,6 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
     ctx.lineWidth = 1; 
     ctx.stroke();
 
-    // バー中身
     ctx.beginPath();
     ctx.moveTo(UI_X, y + BAR_H);
     const curX = UI_X + (BAR_W * volume);
@@ -673,7 +639,8 @@ function drawTitleScreen() {
 function drawMatchingScreen() {
     ctx.fillStyle = "rgba(0, 0, 0, 0.85)"; ctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
     ctx.fillStyle = "white"; ctx.textAlign = "center";
-    // ★修正: 文字の基準を「中心」にしてズレを解消
+    
+    // ★修正: 文字位置を強制的に-5px (引き上げ)
     ctx.textBaseline = "middle";
 
     ctx.font = "28px 'DotGothic16'";
@@ -683,6 +650,11 @@ function drawMatchingScreen() {
     ctx.strokeRect(VIRTUAL_WIDTH/2 - 350, 160, 700, 100);
     ctx.strokeRect(VIRTUAL_WIDTH/2 - 150, 305, 300, 60);
 
+    // ボタンのY中心は 470
+    const btnCenterY = 470;
+    // ★修正: さらに強制的に5px上げる (470 - 5 = 465)
+    const adjY = btnCenterY - 5;
+
     if (isConnected) {
         ctx.fillStyle = "#ff0000"; 
         ctx.fillRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
@@ -690,18 +662,18 @@ function drawMatchingScreen() {
         ctx.strokeRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
         
         ctx.fillStyle = "white";
-        ctx.font = "30px 'DotGothic16'"; ctx.fillText("合流", VIRTUAL_WIDTH / 2, 470);
+        ctx.font = "30px 'DotGothic16'"; ctx.fillText("合流", VIRTUAL_WIDTH / 2, adjY);
     } else if (isMatching) {
         if (Math.floor(Date.now() / 400) % 2 === 0) {
             ctx.strokeStyle = "#ffff00"; ctx.lineWidth = 4;
             ctx.strokeRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
             ctx.fillStyle = "#ffff00";
-            ctx.font = "30px 'DotGothic16'"; ctx.fillText("待機中", VIRTUAL_WIDTH / 2, 470);
+            ctx.font = "30px 'DotGothic16'"; ctx.fillText("待機中", VIRTUAL_WIDTH / 2, adjY);
         } else {
             ctx.strokeStyle = "#555"; ctx.lineWidth = 4;
             ctx.strokeRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
             ctx.fillStyle = "#888";
-            ctx.font = "30px 'DotGothic16'"; ctx.fillText("待機中", VIRTUAL_WIDTH / 2, 470);
+            ctx.font = "30px 'DotGothic16'"; ctx.fillText("待機中", VIRTUAL_WIDTH / 2, adjY);
         }
         
         ctx.fillStyle = "rgba(0,0,0,0.5)";
@@ -712,11 +684,13 @@ function drawMatchingScreen() {
         ctx.strokeStyle = "white"; ctx.lineWidth = 4;
         ctx.strokeRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
         ctx.fillStyle = "white";
-        ctx.font = "30px 'DotGothic16'"; ctx.fillText("待機", VIRTUAL_WIDTH / 2, 470);
+        ctx.font = "30px 'DotGothic16'"; ctx.fillText("待機", VIRTUAL_WIDTH / 2, adjY);
         
         ctx.lineWidth = 2;
         ctx.strokeRect(VIRTUAL_WIDTH - 150, VIRTUAL_HEIGHT - 80, 100, 40);
-        ctx.font = "20px 'DotGothic16'"; ctx.fillText("予演", VIRTUAL_WIDTH - 100, 516); // 微調整済
+        // 予演ボタンの中心Yは 516
+        // ★修正: これも5px上げる (516 - 5 = 511)
+        ctx.font = "20px 'DotGothic16'"; ctx.fillText("予演", VIRTUAL_WIDTH - 100, 511);
     }
     ctx.textBaseline = "alphabetic";
 }
@@ -734,14 +708,11 @@ function drawWrapText(text, x, y, maxWidth, lineHeight) {
     ctx.fillText(line, x, currentY);
 }
 
-// --- ★デッキシステム: 山札の初期化とシャッフル（セッションストレージ対応） ---
-// ホスト用: 1~56の配列を作ってシャッフルする、または保存データを読み込む
 function initDecks() {
     const storedColor = sessionStorage.getItem(S_KEY_DECK_COLOR);
     const storedBgm = sessionStorage.getItem(S_KEY_DECK_BGM);
     const storedIdx = sessionStorage.getItem(S_KEY_DECK_IDX);
 
-    // セッションにデータが残っていて、かつ有効ならロード
     if (storedColor && storedBgm && storedIdx !== null) {
         try {
             deckColorIndices = JSON.parse(storedColor);
@@ -753,7 +724,6 @@ function initDecks() {
             return;
         }
         
-        // 万が一空の場合は生成し直し
         if (deckColorIndices.length !== 56 || deckBgmIndices.length !== 56) {
              generateNewDeck();
         }
@@ -771,7 +741,6 @@ function generateNewDeck() {
     saveSessionData();
 }
 
-// セッションストレージへの保存関数
 function saveSessionData() {
     sessionStorage.setItem(S_KEY_DECK_COLOR, JSON.stringify(deckColorIndices));
     sessionStorage.setItem(S_KEY_DECK_BGM, JSON.stringify(deckBgmIndices));
@@ -779,7 +748,6 @@ function saveSessionData() {
     sessionStorage.setItem(S_KEY_PLAY_COUNT, playCount);
 }
 
-// 演出用シャッフル（Math.random）
 function shuffleArrayVisual(array) {
     for (let i = array.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -787,7 +755,6 @@ function shuffleArrayVisual(array) {
     }
 }
 
-// ゲームロジック用シャッフル (Xorshift)
 function shuffle(array) {
     for (let i = array.length - 1; i > 0; i--) {
         const j = Math.floor(rnd.nextFloat() * (i + 1));
@@ -809,7 +776,7 @@ function stopCurrentBgm() {
 }
 
 function playAndFadeIn(srcOrAudio, targetVolRatio, fadeDuration = 600) {
-    stopCurrentBgm(); // 前の曲を完全に止める
+    stopCurrentBgm(); 
     
     let audio;
     let srcName = "";
@@ -863,7 +830,7 @@ function enterRageBgm() {
 
 function playSE(audioArrayOrSingle, volumeRatio = 0.6, pitchRand = 0.1, basePitch = 1.0) {
     if (isGreyMode) return; 
-    if (isMutedSE) return; // ミュート時再生しない
+    if (isMutedSE) return; 
 
     const audio = Array.isArray(audioArrayOrSingle) ? audioArrayOrSingle[Math.floor(rnd.nextFloat() * audioArrayOrSingle.length)] : audioArrayOrSingle;
     const clone = audio.cloneNode();
@@ -994,8 +961,6 @@ function calculateShortestPath() {
     return distanceToDaughter * 1.5; 
 }
 
-// --- ★修正: デッキシステム・出現条件修正版 startDungeonGame ---
-// hostOverrideData: { seed: number, colorIdx: number, bgmIdx: number }
 function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     isDebugMode = debugFlag; 
     
@@ -1004,24 +969,18 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     let selectedBgmIdx;
 
     if (hostOverrideData !== null) {
-        // --- ゲスト側 ---
         seedVal = hostOverrideData.seed;
         selectedColorIdx = hostOverrideData.colorIdx;
         selectedBgmIdx = hostOverrideData.bgmIdx;
     } else {
-        // --- ホスト側 or デバッグモード ---
-        // 1. マップ生成用の乱数シード決定
         if (!isDebugMode && playCount === 0 && passEl.value) {
             seedVal = hashCode(passEl.value);
         } else {
             seedVal = Math.floor(Math.random() * 4294967296);
         }
 
-        // 2. デッキから色とBGMを引き抜く
-        // まずセッションストレージから最新の状態をロード
         initDecks();
         
-        // もし山札切れならリシャッフル（強制生成）
         if (currentDeckIndex >= 56) {
             generateNewDeck();
         }
@@ -1029,20 +988,16 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
         selectedColorIdx = deckColorIndices[currentDeckIndex];
         selectedBgmIdx = deckBgmIndices[currentDeckIndex];
         
-        // デッキ消費とプレイ回数の更新
         currentDeckIndex++;
         playCount++;
-        saveSessionData(); // ★ここで保存
+        saveSessionData(); 
     }
 
-    // 確定した値で設定
     rnd = new Xorshift(seedVal);
     currentStageColor = FLOOR_COLORS_56[selectedColorIdx];
     currentStageBgm.normal = NORMAL_BGMS_56[selectedBgmIdx];
     currentStageBgm.rage = RAGE_BGMS_56[selectedBgmIdx];
 
-    // --- 以降は共通処理 ---
-    // ★修正: playCountはセッションで維持されるため、2回目以降の判定がリロード後も有効になる
     isGreyMode = (playCount >= 2 && rnd.nextFloat() < 0.01); 
 
     if (isGreyMode) {
@@ -1050,7 +1005,6 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     } else {
         canvas.classList.remove('grey-mode-canvas');
     }
-    // ★修正: 明度フィルターの適用（アニメーション有無で切り替え）
     updateBrightnessFilter();
     
     gameState = 'game';
@@ -1069,7 +1023,6 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     signalState = { active: false, type: null, startTime: 0, p1: false, p2: false, agreedTime: 0 };
     signalMsgEl.style.opacity = 0;
 
-    // ホストならゲストへ「決定事項」を送信
     if (!isDebugMode && isHost && conn && conn.open) {
         conn.send({ 
             type: 'START', 
@@ -1082,7 +1035,6 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     generateDungeon();
 }
 
-// デバッグ用情報更新
 function updateInfoText() {
     if (!isDebugMode) return;
     infoPanel.innerText = `Deck: ${currentDeckIndex}/56\nColorIdx: ${deckColorIndices[currentDeckIndex-1]}\nBgmIdx: ${deckBgmIndices[currentDeckIndex-1]}\nPlayCount: ${playCount}\n${currentBgmDebugName}`;
@@ -1407,7 +1359,6 @@ function gameLoopStep() {
                 [player1, player2].forEach(p => {
                     if (Math.abs(p.x - a.x) <= 1 && Math.abs(p.y - a.y) <= 1) {
                         hpP1 = 0; hpP2 = 0; 
-                        // 即ゲームオーバー
                         if (!isDebugMode && !isGameOver && !gameCleared) {
                             isGameOver = true; timerStopped = true;
                             showResult();
@@ -2011,9 +1962,6 @@ function showResult() {
 } // --- showResult終了 ---
 
 function drawGameScreen() {
-    // ★修正: 描画ごとにスタイルを上書きしていた処理を削除
-    // 代わりに明度変更時のみCSS変数を更新する方式に変更済み (updateBrightnessFilter)
-
     ctx.fillStyle = "#111"; ctx.fillRect(0,0,VIRTUAL_WIDTH,VIRTUAL_HEIGHT);
     
     const now = performance.now();
@@ -2035,7 +1983,6 @@ function drawGameScreen() {
     
     ctx.imageSmoothingEnabled = false;
     
-    // ★軽量化: 座標を整数化して描画 (Math.floor)
     ctx.drawImage(floorCanvas, Math.floor(vx*SCALED_TILE), Math.floor(vy*SCALED_TILE), DARKNESS_WIDTH, DARKNESS_HEIGHT, 0, 0, DARKNESS_WIDTH, DARKNESS_HEIGHT);
     
     const drawSprite = (img, gx, gy, scaleX=1, scaleY=1, offsetY=0, filter='', rotation=0, originY=0) => {
@@ -2048,7 +1995,6 @@ function drawGameScreen() {
         const drawY = dy + SCALED_TILE - dh + offsetY;
         
         ctx.save();
-        // ★軽量化: 整数座標を使用
         ctx.translate(Math.floor(drawX + dw/2), Math.floor(drawY + dh - originY));
         ctx.rotate(rotation);
         ctx.translate(-Math.floor(drawX + dw/2), -Math.floor(drawY + dh - originY));
@@ -2212,7 +2158,6 @@ function drawGameScreen() {
             const cy = (p.y-vy)*SCALED_TILE + SCALED_TILE/2;
             
             darknessCtx.globalCompositeOperation = 'destination-out';
-            // ★軽量化: 整数座標を使用
             darknessCtx.drawImage(visionHoleCanvas, Math.floor(cx - visionRadius), Math.floor(cy - visionRadius));
 
             if (isGreyMode) {
@@ -2253,20 +2198,16 @@ function drawGameScreen() {
     }
     drawHeartsUI();
     
-    // --- ★修正: メッセージ表示（合意制・赤字） ---
     if (signalState.active) {
         let msg = "";
         
         if (gameCleared) {
-            // クリア時
             if (signalState.type === 'R') msg = "続行の合図だ！(R)";
             else if (signalState.type === 'W') msg = "帰還の合図だ！(W)";
         } else if (isGameOver) {
-            // ゲームオーバー時
             if (signalState.type === 'R') msg = "再起の合図だ！(R)";
             else if (signalState.type === 'W') msg = "帰還の合図だ！(W)";
         } else {
-            // プレイ中
             if (signalState.type === 'R') msg = "撤退の合図だ！(R)";
         }
         
@@ -2274,7 +2215,6 @@ function drawGameScreen() {
             signalMsgEl.innerText = msg;
             signalMsgEl.style.opacity = 1;
             
-            // 合意成立時 (2秒待機中) は赤文字に
             if (signalState.agreedTime) {
                 signalMsgEl.style.color = "#ff0000";
                 signalMsgEl.style.borderColor = "#ff0000";
@@ -2314,33 +2254,27 @@ function drawAnalogClock() {
     ctx.save();
     ctx.translate(CX, CY);
     
-    // S Zone
     let gradS = ctx.createRadialGradient(0, 0, R*0.2, 0, 0, R);
     gradS.addColorStop(0, "#FFFACD"); gradS.addColorStop(0.5, "#FFD700"); gradS.addColorStop(1, "#DAA520");
     ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, R, startAngle, angleS); ctx.fillStyle = gradS; ctx.fill();
 
-    // A Zone
     let gradA = ctx.createRadialGradient(0, 0, R*0.2, 0, 0, R);
     gradA.addColorStop(0, "#FFFFFF"); gradA.addColorStop(0.5, "#C0C0C0"); gradA.addColorStop(1, "#A9A9A9");
     ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, R, angleS, angleA); ctx.fillStyle = gradA; ctx.fill();
 
-    // B Zone
     let gradB = ctx.createRadialGradient(0, 0, R*0.2, 0, 0, R);
     gradB.addColorStop(0, "#FFDAB9"); gradB.addColorStop(0.5, "#CD7F32"); gradB.addColorStop(1, "#8B4513");
     ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, R, angleA, angleB); ctx.fillStyle = gradB; ctx.fill();
 
-    // C Zone
     let gradC = ctx.createRadialGradient(0, 0, R*0.2, 0, 0, R);
     gradC.addColorStop(0, "#555555"); gradC.addColorStop(1, "#000000");
     ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, R, angleB, angleMax); ctx.fillStyle = gradC; ctx.fill();
 
-    // Frame (Platinum)
     let gradFrame = ctx.createLinearGradient(-R, -R, R, R);
     gradFrame.addColorStop(0, "#E5E4E2"); gradFrame.addColorStop(0.5, "#A0A0A0"); gradFrame.addColorStop(1, "#F0F0F0");
     ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI*2);
     ctx.strokeStyle = gradFrame; ctx.lineWidth = 4; ctx.stroke();
 
-    // Needle
     let currentRad;
     if (t >= maxTime) {
         const shake = (rnd.nextFloat() - 0.5) * 0.2; 
@@ -2553,16 +2487,12 @@ function updateMinimap() {
     goblins.forEach(g => { if(g.hp>0) drawDot(g.x, g.y, g.state===STATE.RAGE?"#a0f":"#fa0"); });
 } // --- updateMinimap終了 ---
 
-// --- 入力・データ保存イベント ---
 function handleDown(e) {
     if (gameState === 'gate') return;
 
     const pos = getMousePos(e);
-    
-    // UIバー判定
     const volAreaX = UI_X - 10;
     
-    // BGM
     if (pos.x >= volAreaX && pos.x <= UI_X + BAR_W + 10) {
         if (pos.x < UI_X && pos.y >= UI_Y_START && pos.y <= UI_Y_START + BAR_H) {
             isMutedBGM = !isMutedBGM;
@@ -2574,7 +2504,6 @@ function handleDown(e) {
         }
     }
     
-    // SE
     if (pos.x >= volAreaX && pos.x <= UI_X + BAR_W + 10) {
         if (pos.x < UI_X && pos.y >= UI_Y_START + 35 && pos.y <= UI_Y_START + 35 + BAR_H) {
             isMutedSE = !isMutedSE;
@@ -2586,7 +2515,6 @@ function handleDown(e) {
         }
     }
 
-    // Light (明度)
     if (pos.x >= volAreaX && pos.x <= UI_X + BAR_W + 10) {
         if (pos.y >= UI_Y_START + 65 && pos.y <= UI_Y_START + 65 + BAR_H + 5) {
             isDraggingBright = true;
@@ -2628,7 +2556,6 @@ function handleDown(e) {
     }
 } // --- handleDown終了 ---
 
-// マウス位置取得
 function getMousePos(e) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -2658,7 +2585,6 @@ window.addEventListener('mousemove', (e) => {
     if (isDraggingSE) seVolume = vol;
     if (isDraggingBright) {
         brightnessLevel = vol;
-        // ★修正: 明度変更時のみ更新関数を呼ぶ
         updateBrightnessFilter();
     }
 });
@@ -2674,7 +2600,6 @@ passEl.addEventListener('input', () => {
     localStorage.setItem('goblinsNest_pass', passEl.value);
 });
 
-// キー入力処理 (PC)
 const keys = {};
 window.addEventListener('keydown', (e) => {
     keys[e.key] = true;
@@ -2686,7 +2611,6 @@ window.addEventListener('keydown', (e) => {
                 signalState.startTime = performance.now();
                 if (isHost) {
                     signalState.p1 = true;
-                    // ホストが押したことを即座に反映
                     if (conn && conn.open) conn.send({ type: 'SIGNAL', key: 'R' });
                 } else {
                     signalState.p2 = true;
@@ -2713,7 +2637,6 @@ window.addEventListener('keydown', (e) => {
             }
         }
 
-        // 移動・攻撃
         if (isHost || isDebugMode) {
             let dx = 0, dy = 0;
             if (keys['ArrowUp']) dy = -1;
@@ -2724,7 +2647,6 @@ window.addEventListener('keydown', (e) => {
             if (dx !== 0 || dy !== 0) movePlayer(player1, dx, dy);
             if (keys['z'] || keys['Z']) playerAttack(player1);
 
-            // デバッグ用: P2操作
             if (isDebugMode) {
                 let d2x = 0, d2y = 0;
                 if (keys['w'] || keys['W']) d2y = -1;
@@ -2735,7 +2657,6 @@ window.addEventListener('keydown', (e) => {
                 if (keys['x'] || keys['X']) playerAttack(player2);
             }
         } else {
-            // Guest -> Host
             let dx = 0, dy = 0;
             if (keys['ArrowUp']) dy = -1;
             else if (keys['ArrowDown']) dy = 1;
@@ -2760,24 +2681,20 @@ window.addEventListener('keyup', (e) => {
     keys[e.key] = false;
 });
 
-// PeerJS初期化
 function initPeer(password) {
     if (peer) return;
     isMatching = true;
     
-    // PeerID生成 (Beta1.9用Prefix)
     const myId = PEER_ID_PREFIX + hashCode(password); 
     
     peer = new Peer(null, { debug: 1 }); 
 
     peer.on('open', (id) => {
-        // ホストとして接続試行
         tryConnectAsHost(myId);
     });
 
     peer.on('error', (err) => {
         console.log("Peer Error: ", err);
-        // IDが取れない(=誰かが既にHostとして待機中) -> Guestとして接続へ
         if (err.type === 'unavailable-id') {
             connectAsGuest(myId);
         } else {
@@ -2787,19 +2704,16 @@ function initPeer(password) {
     });
 }
 
-// 自分がHostになろうとする
 function tryConnectAsHost(baseId) {
     const hostId = baseId + "_HOST";
-    // 一旦破棄してID指定で作り直す
     if(peer) peer.destroy();
     
     peer = new Peer(hostId, { debug: 1 });
     
     peer.on('open', (id) => {
         isHost = true;
-        // 接続待ち
         peer.on('connection', (c) => {
-            if (conn) { c.close(); return; } // 1対1のみ
+            if (conn) { c.close(); return; } 
             conn = c;
             setupConnection();
         });
@@ -2807,7 +2721,6 @@ function tryConnectAsHost(baseId) {
     
     peer.on('error', (err) => {
         if (err.type === 'unavailable-id') {
-            // Hostが既にいる -> Guestになる
             connectAsGuest(baseId);
         }
     });
@@ -2815,7 +2728,6 @@ function tryConnectAsHost(baseId) {
 
 function connectAsGuest(baseId) {
     const hostId = baseId + "_HOST";
-    // 自分のIDはランダムで良い
     if(peer) peer.destroy();
     peer = new Peer(null, {debug: 1});
     
@@ -2830,13 +2742,11 @@ function connectAsGuest(baseId) {
 function setupConnection() {
     conn.on('open', () => {
         isConnected = true;
-        isMatching = false; // 待機終了
-        // HostならGuestの名前を取得したいが、まずは接続確立
+        isMatching = false; 
     });
     
     conn.on('data', (data) => {
         if (isHost) {
-            // --- Host受信 ---
             if (data.type === 'MOVE') {
                 guestInputState.dx = data.dx;
                 guestInputState.dy = data.dy;
@@ -2850,16 +2760,12 @@ function setupConnection() {
                 playSignalSound(data.key);
             }
         } else {
-            // --- Guest受信 ---
             if (data.type === 'SYNC') {
-                // 完全同期
                 player1.x = data.p1.x; player1.y = data.p1.y; player1.facing = data.p1.f; player1.stepCount = data.p1.sc;
                 player2.x = data.p2.x; player2.y = data.p2.y; player2.facing = data.p2.f; player2.stepCount = data.p2.sc;
                 hpP1 = data.hp.p1; hpP2 = data.hp.p2;
                 daughter.x = data.d.x; daughter.y = data.d.y; daughter.rescued = data.d.r; daughter.rescuer = data.d.er;
                 
-                // Goblin同期 (簡易)
-                // 本来はID管理すべきだが、配列順序が同じ前提
                 if (goblins.length !== data.g.length) goblins = new Array(data.g.length).fill({});
                 data.g.forEach((gData, i) => {
                      goblins[i] = {
@@ -2876,20 +2782,17 @@ function setupConnection() {
                 isGameOver = data.go;
                 isGreyMode = data.gm;
 
-                // ゲスト側の視界用
                 updateInputPosition();
 
             } else if (data.type === 'START') {
-                // ゲーム開始シグナル (確定情報を受け取る)
                 startDungeonGame(false, { seed: data.seed, colorIdx: data.colorIdx, bgmIdx: data.bgmIdx });
                 
             } else if (data.type === 'SPAWN_EFFECT') {
-                // エフェクト発生
                 if (data.kind === 'goblin') {
                      attackEffects.push({
                         x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
                     });
-                    const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); // 簡易
+                    const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); 
                     playSE(SE.goblinAttack, 0.7, 0.15, pitch);
                 } else if (data.kind === 'player') {
                      attackEffects.push({
