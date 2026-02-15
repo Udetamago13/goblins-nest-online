@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.8</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.9</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -304,9 +304,9 @@ const visionHoleCanvas = document.createElement('canvas');
 visionHoleCanvas.width = visionSize; visionHoleCanvas.height = visionSize;
 const vhCtx = visionHoleCanvas.getContext('2d');
 const vhGrad = vhCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
-vhGrad.addColorStop(0, "rgba(0,0,0,1)");              
+vhGrad.addColorStop(0, "rgba(0,0,0,1)");               
 vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");        
-vhGrad.addColorStop(1, "rgba(0,0,0,0)");              
+vhGrad.addColorStop(1, "rgba(0,0,0,0)");               
 vhCtx.fillStyle = vhGrad;
 vhCtx.beginPath(); vhCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); vhCtx.fill();
 
@@ -356,8 +356,9 @@ let debugCurrentNormalIdx = -1;
 let debugCurrentRageIdx = -1;
 
 let currentAudio = null;
-let fadeInterval = null; 
 let currentMusicState = 'normal';
+// BGMフェード用変数 (Ver.2.9)
+let currentFadeVolume = 1.0; 
 
 const floorTileImg = new Image(); floorTileImg.src = 'assets/floor/floor_tile.png';
 const goblinImages = { front: new Image(), back: new Image(), side: new Image() };
@@ -484,7 +485,14 @@ function update() {
     if(titleBGM) titleBGM.volume = realBGMVol;
     if(clearBGM) clearBGM.volume = realBGMVol;
     
-    if(currentAudio && !fadeInterval) currentAudio.volume = (currentMusicState==='rage' ? 0.5 : 0.4) * realBGMVol * 2.5;
+    // Ver.2.9: フェード処理の実装
+    if(currentAudio) {
+        if (currentFadeVolume < 1.0) {
+            currentFadeVolume += 0.015; // 徐々に音量を上げる
+            if (currentFadeVolume > 1.0) currentFadeVolume = 1.0;
+        }
+        currentAudio.volume = (currentMusicState==='rage' ? 0.5 : 0.4) * realBGMVol * 2.5 * currentFadeVolume;
+    }
     
     if(greyBGM) {
         let greyVolFactor = 0.0;
@@ -679,7 +687,6 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
     ctx.textAlign = "right";
     ctx.textBaseline = "middle"; 
     const textX = UI_X - 10;
-    // 修正: 物理補正 -4px を適用
     const textY = y + BAR_H/2 - 4; 
     ctx.fillText(label, textX, textY);
 
@@ -688,7 +695,6 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
         ctx.strokeStyle = "red";
         ctx.lineWidth = 2;
         ctx.beginPath();
-        // 修正: 斜線位置も補正後の座標に合わせる
         ctx.moveTo(textX - textWidth, textY + 6);
         ctx.lineTo(textX + 2, textY - 6);
         ctx.stroke();
@@ -889,9 +895,9 @@ function playAndFadeIn(srcOrAudio, targetVolRatio, fadeDuration = 600) {
     }
     audio.loop = true; 
     
-    const realBGMVol = isMutedBGM ? 0 : bgmVolume;
-    const targetVolume = targetVolRatio * realBGMVol * 2.5; 
-    audio.volume = targetVolume;
+    // Ver.2.9: 音量を0から開始し、updateループでフェードさせる
+    currentFadeVolume = 0.0;
+    audio.volume = 0;
     
     audio.play().catch((e) => { 
         console.log("BGM Play Error:", e); 
@@ -1157,7 +1163,8 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
             colorIdx: selectedColorIdx, 
             normalIdx: selectedNormalIdx, 
             rageIdx: selectedRageIdx,
-            playCount: playCount 
+            playCount: playCount,
+            ff: isFriendlyFire // Ver.2.9: 初期FF設定を同期
         });
     }
 
@@ -2499,7 +2506,7 @@ function drawHeartsUI() {
     
     for (let i = 0; i < 10; i++) {
         const row = Math.floor(i / 5); 
-        const col = i % 5;                
+        const col = i % 5;                 
         const x = startX + col * spacingX;
         const y = startY + row * spacingY;
         
@@ -2886,6 +2893,8 @@ window.addEventListener('keydown', (e) => {
             }
             if (keys['z'] || keys['Z']) {
                 if (conn && conn.open) conn.send({ type: 'ATTACK' });
+                // Ver.2.9: ゲスト側の攻撃即時フィードバック (空振り音)
+                playSE(SE.playerAttack2, 0.5, 0.05);
             }
         }
     } else if (gameState === 'title') {
@@ -3017,12 +3026,12 @@ function setupConnection() {
 
                 if (goblins.length !== data.g.length) goblins = new Array(data.g.length).fill({});
                 data.g.forEach((gData, i) => {
-                      goblins[i] = {
-                          x: gData.x, y: gData.y, facing: gData.f, state: gData.s, hp: gData.hp,
-                          sizeScale: gData.sc, bobOffset: gData.bo, 
-                          deathTime: gData.dt, deathAngle: gData.da, dissolveProgress: gData.dp,
-                          isCasting: gData.ic
-                      };
+                       goblins[i] = {
+                           x: gData.x, y: gData.y, facing: gData.f, state: gData.s, hp: gData.hp, 
+                           sizeScale: gData.sc, bobOffset: gData.bo, 
+                           deathTime: gData.dt, deathAngle: gData.da, dissolveProgress: gData.dp,
+                           isCasting: gData.ic
+                       };
                 });
                 
                 signalState = data.sig;
@@ -3056,7 +3065,11 @@ function setupConnection() {
                       attackEffects.push({
                           x: data.x, y: data.y, type: 'player', owner: data.owner, dir: data.dir, startTime: performance.now(), duration: 100
                       });
-                      playSE(data.owner==='p1'?SE.playerAttack1:SE.playerAttack2, 0.5, 0.05);
+                      // Ver.2.9: ゲストかつ自分の攻撃なら音を鳴らさない(即時再生済み)
+                      const isMe = !isHost && data.owner === 'p2';
+                      if (!isMe) {
+                          playSE(data.owner==='p1'?SE.playerAttack1:SE.playerAttack2, 0.5, 0.05);
+                      }
                 }
             } else if (data.type === 'PLAYER_HIT') {
                 const p = data.target === 'p1' ? player1 : player2;
