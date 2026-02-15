@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.9</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 3.0</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -17,7 +17,6 @@
         #game-wrapper { position: relative; }
         #game-container { position: relative; width: 1024px; height: 576px; background: #111; overflow: hidden; box-shadow: 0 0 20px #333; }
         
-        /* 入場ゲート画面 */
         #gate-screen {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; z-index: 100;
@@ -121,7 +120,6 @@
 </div>
 
 <script>
-// --- Xorshift乱数生成クラス ---
 class Xorshift {
     constructor(seed = 88675123) {
         this.x = 123456789;
@@ -135,20 +133,24 @@ class Xorshift {
         this.w = (this.w ^ (this.w >>> 19)) ^ (t ^ (t >>> 8));
         return (this.w >>> 0) / 4294967296;
     }
-} // --- Xorshift 終了 ---
+}
 
-// --- Fisher-Yates Shuffle (ブラウザ依存回避) ---
 function shuffleArray(array, rng) {
     for (let i = array.length - 1; i > 0; i--) {
         const j = Math.floor(rng.nextFloat() * (i + 1));
         [array[i], array[j]] = [array[j], array[i]];
     }
     return array;
-} // --- shuffleArray 終了 ---
+}
 
-// --- 音響資源管理用シングルトン ---
+function shuffleArrayVisual(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
 let sharedAudioCtx = null;
-
 function getSharedAudioContext() {
     if (!sharedAudioCtx) {
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -158,7 +160,7 @@ function getSharedAudioContext() {
         sharedAudioCtx.resume().catch(()=>{});
     }
     return sharedAudioCtx;
-} // --- getSharedAudioContext 終了 ---
+}
 
 function hashCode(str) {
     let hash = 0;
@@ -169,23 +171,13 @@ function hashCode(str) {
         hash |= 0; 
     }
     return Math.abs(hash) + 1;
-} // --- hashCode 終了 ---
+}
 
 function safeGetItem(key) {
-    try {
-        return localStorage.getItem(key);
-    } catch (e) {
-        console.warn('Storage access blocked:', e);
-        return null;
-    }
+    try { return localStorage.getItem(key); } catch (e) { return null; }
 } 
-
 function safeSetItem(key, val) {
-    try {
-        localStorage.setItem(key, val);
-    } catch (e) {
-        console.warn('Storage saving blocked:', e);
-    }
+    try { localStorage.setItem(key, val); } catch (e) { }
 } 
 
 const canvas = document.getElementById('gameCanvas');
@@ -211,7 +203,7 @@ let savedBright = safeGetItem('goblinsNest_bright');
 let brightnessLevel = savedBright !== null ? parseFloat(savedBright) : 0.5;
 
 let savedFF = safeGetItem('goblinsNest_isFF');
-let isFriendlyFire = savedFF === 'true'; // デフォルトはfalse
+let isFriendlyFire = savedFF === 'true'; 
 
 if (canvas) {
     const bVal = 0.6 + (brightnessLevel * 0.8);
@@ -236,14 +228,13 @@ let isDraggingBGM = false;
 let isDraggingSE = false;
 let isDraggingBright = false; 
 
-const PEER_ID_PREFIX = 'gn_beta2_'; 
+const PEER_ID_PREFIX = 'gn_beta3_'; 
 let peer = null;
 let conn = null;
 let isMatching = false; 
 let isConnected = false; 
 let isHost = false; 
 
-// 入力消失修正: 単一ステートではなくキュー管理に変更
 let guestInputQueue = []; 
 
 let lastSyncTime = 0;
@@ -285,14 +276,11 @@ const RAGE_COOLDOWN = 180;
 const GOBLIN_LOOK_INTERVAL = 300;
 const GOBLIN_UPDATE_INTERVAL = 80;
 const MINIMAP_UPDATE_INTERVAL = 200;
-const ATTACK_SHAKE = 2;
 const HIT_SHAKE_DURATION = 120;
-const HIT_SHAKE_POWER = 3;
 const ATTACK_SCALE_START = 1.3;
 const IFRAME_DURATION = 500;
 const SMELL_RADIUS = 3;
 const SIGHT_RADIUS = 7;
-const DAUGHTER_OFFSET_Y = 0.3;
 const ATTACK_COOLDOWN = 0.1;
 
 const STATE = { IDLE: 'idle', ALERT: 'alert', LOCK: 'lock', RAGE: 'rage', CHARGE: 'charge', REAPPEAR: 'reappear', DYING: 'dying' };
@@ -304,9 +292,9 @@ const visionHoleCanvas = document.createElement('canvas');
 visionHoleCanvas.width = visionSize; visionHoleCanvas.height = visionSize;
 const vhCtx = visionHoleCanvas.getContext('2d');
 const vhGrad = vhCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
-vhGrad.addColorStop(0, "rgba(0,0,0,1)");               
+vhGrad.addColorStop(0, "rgba(0,0,0,1)");                
 vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");        
-vhGrad.addColorStop(1, "rgba(0,0,0,0)");               
+vhGrad.addColorStop(1, "rgba(0,0,0,0)");                
 vhCtx.fillStyle = vhGrad;
 vhCtx.beginPath(); vhCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); vhCtx.fill();
 
@@ -357,7 +345,6 @@ let debugCurrentRageIdx = -1;
 
 let currentAudio = null;
 let currentMusicState = 'normal';
-// BGMフェード用変数 (Ver.2.9)
 let currentFadeVolume = 1.0; 
 
 const floorTileImg = new Image(); floorTileImg.src = 'assets/floor/floor_tile.png';
@@ -436,7 +423,8 @@ if (safeGetItem('goblinsNest_gatePassed')) {
     gameState = 'title';
 }
 
-gatePassInput.addEventListener('input', () => {
+gatePassInput.addEventListener('input', (e) => {
+    if (e.isComposing) return;
     gatePassInput.value = gatePassInput.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
 });
 
@@ -447,6 +435,7 @@ function attemptGatePass() {
         gameState = 'title';
         safeSetItem('goblinsNest_gatePassed', 'true');
         isInputLocked = true;
+        updateInputPosition(); 
         setTimeout(() => { isInputLocked = false; }, 500);
     } else {
         gatePassInput.value = '';
@@ -456,7 +445,6 @@ function attemptGatePass() {
 } 
 
 gateBtn.addEventListener('click', attemptGatePass);
-
 gatePassInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) {
         attemptGatePass();
@@ -485,10 +473,9 @@ function update() {
     if(titleBGM) titleBGM.volume = realBGMVol;
     if(clearBGM) clearBGM.volume = realBGMVol;
     
-    // Ver.2.9: フェード処理の実装
     if(currentAudio) {
         if (currentFadeVolume < 1.0) {
-            currentFadeVolume += 0.015; // 徐々に音量を上げる
+            currentFadeVolume += 0.015; 
             if (currentFadeVolume > 1.0) currentFadeVolume = 1.0;
         }
         currentAudio.volume = (currentMusicState==='rage' ? 0.5 : 0.4) * realBGMVol * 2.5 * currentFadeVolume;
@@ -522,11 +509,8 @@ function update() {
         signalState.p2 = false;
         signalMsgEl.style.opacity = 0;
     }
-
-    updateInputPosition(); 
     
     if (gameState === 'game') {
-        // 同期による娘発見フラグの監視とBGM遷移
         if (!foundDaughterNotified && daughter.rescued) {
              foundDaughter = true;
              foundDaughterNotified = true;
@@ -543,8 +527,6 @@ function update() {
 
         if (!isDebugMode) { 
             if (isHost) {
-                // ホスト側：入力キューの消化
-                // 1フレームあたり最大5件処理して、詰まりを解消しつつテレポートを防ぐ
                 let processed = 0;
                 while (guestInputQueue.length > 0 && processed < 5) {
                     const input = guestInputQueue.shift();
@@ -595,11 +577,17 @@ function update() {
                             go: isGameOver,
                             gm: isGreyMode,
                             hn: nameEl.value,
-                            ff: isFriendlyFire // FF設定を同期
+                            ff: isFriendlyFire 
                         };
                         conn.send(state);
                         lastSyncTime = now;
                     }
+                }
+            } else {
+                const now = performance.now();
+                 if (now - lastMinimapUpdate > MINIMAP_UPDATE_INTERVAL) {
+                    updateMinimap();
+                    lastMinimapUpdate = now;
                 }
             }
         } else {
@@ -609,7 +597,7 @@ function update() {
 
     draw(); 
     requestAnimationFrame(update);
-} // --- update 終了 ---
+} 
 
 function updateInputPosition() {
     const rect = canvas.getBoundingClientRect();
@@ -665,6 +653,8 @@ function updateInputPosition() {
     }
 } 
 
+window.addEventListener('resize', updateInputPosition);
+
 function draw() {
     ctx.clearRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
     if (gameState === 'game') {
@@ -718,7 +708,7 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
     ctx.closePath();
     ctx.fillStyle = color; 
     ctx.fill();
-} // --- drawTriangleVolumeBar 終了 ---
+} 
 
 function drawTitleScreen() {
     ctx.textAlign = "center";
@@ -781,12 +771,10 @@ function drawMatchingScreen() {
         ctx.fillStyle = "white";
         ctx.font = "30px 'DotGothic16'"; ctx.fillText("待機", VIRTUAL_WIDTH / 2, BTN_CENTER_Y + TEXT_OFFSET_Y);
         
-        // 予演ボタン
         ctx.lineWidth = 2;
         ctx.strokeRect(VIRTUAL_WIDTH - 150, VIRTUAL_HEIGHT - 80, 100, 40);
         ctx.font = "20px 'DotGothic16'"; ctx.fillText("予演", VIRTUAL_WIDTH - 100, DEBUG_BTN_CENTER_Y + TEXT_OFFSET_Y); 
         
-        // FF設定ボタン（左下）
         ctx.lineWidth = 2;
         ctx.strokeRect(50, VIRTUAL_HEIGHT - 80, 140, 40);
         if (isFriendlyFire) {
@@ -860,13 +848,6 @@ function saveSessionData(prefix) {
     safeSetItem(sKeyCount, playCount);
 } 
 
-function shuffleArrayVisual(array) {
-    for (let i = array.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [array[i], array[j]] = [array[j], array[i]];
-    }
-}
-
 function stopCurrentBgm() {
     if (currentAudio) { 
         currentAudio.pause();
@@ -895,7 +876,6 @@ function playAndFadeIn(srcOrAudio, targetVolRatio, fadeDuration = 600) {
     }
     audio.loop = true; 
     
-    // Ver.2.9: 音量を0から開始し、updateループでフェードさせる
     currentFadeVolume = 0.0;
     audio.volume = 0;
     
@@ -937,11 +917,11 @@ function playSE(audioArrayOrSingle, volumeRatio = 0.6, pitchRand = 0.1, basePitc
     if (isGreyMode) return; 
     if (isMutedSE) return;
 
-    const audio = Array.isArray(audioArrayOrSingle) ? audioArrayOrSingle[Math.floor(rnd.nextFloat() * audioArrayOrSingle.length)] : audioArrayOrSingle;
+    const audio = Array.isArray(audioArrayOrSingle) ? audioArrayOrSingle[Math.floor(Math.random() * audioArrayOrSingle.length)] : audioArrayOrSingle;
     const clone = audio.cloneNode();
     clone.currentTime = 0;
     clone.volume = Math.min(1, volumeRatio * seVolume * 2); 
-    clone.playbackRate = basePitch + (rnd.nextFloat() - 0.5) * pitchRand;
+    clone.playbackRate = basePitch + (Math.random() - 0.5) * pitchRand;
     clone.play().catch(() => {});
 }
 
@@ -967,7 +947,7 @@ function playElectronicBlip() {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} // --- playElectronicBlip 終了 ---
+} 
 
 function playSignalSound(type) {
     if (isMutedSE) return;
@@ -1004,7 +984,7 @@ function playSignalSound(type) {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} // --- playSignalSound 終了 ---
+} 
 
 function playClickSound() {
     if (isMutedSE) return;
@@ -1028,7 +1008,7 @@ function playClickSound() {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} // --- playClickSound 終了 ---
+} 
 
 function playChurchBell() {
     if (isMutedSE) return;
@@ -1059,7 +1039,7 @@ function playChurchBell() {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} // --- playChurchBell 終了 ---
+} 
 
 function calculateShortestPath() {
     let startNode = {x: startLeftX, y: startBottomY};
@@ -1089,7 +1069,7 @@ function calculateShortestPath() {
 
 function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     isDebugMode = debugFlag; 
-    guestInputQueue = []; // ゲーム開始時にキューをクリア
+    guestInputQueue = []; 
 
     const prefix = isDebugMode ? S_KEY_PREFIX_DEBUG : S_KEY_PREFIX_REAL;
     
@@ -1104,6 +1084,10 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
         selectedNormalIdx = hostOverrideData.normalIdx;
         selectedRageIdx = hostOverrideData.rageIdx;
         playCount = hostOverrideData.playCount; 
+
+        if (hostOverrideData.ff !== undefined) {
+             isFriendlyFire = hostOverrideData.ff;
+        }
         
     } else {
         initDecks(prefix);
@@ -1146,6 +1130,8 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     uiLayer.style.display = 'block';
     nameEl.style.display = 'none'; passEl.style.display = 'none';
     
+    updateInputPosition();
+    
     if (isDebugMode) {
         infoPanel.style.display = 'block';
         currentBgmDebugName = ""; 
@@ -1164,7 +1150,7 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
             normalIdx: selectedNormalIdx, 
             rageIdx: selectedRageIdx,
             playCount: playCount,
-            ff: isFriendlyFire // Ver.2.9: 初期FF設定を同期
+            ff: isFriendlyFire 
         });
     }
 
@@ -1248,7 +1234,7 @@ function getNextStepBFS(startX, startY, targetX, targetY) {
         if (curr.x === targetX && curr.y === targetY) { found = true; break; }
         
         let dirs = [...DIRS];
-        shuffleArray(dirs, rnd); // シャッフル修正
+        shuffleArray(dirs, rnd); 
         
         for (let [dx, dy] of dirs) {
             let nx = curr.x + dx, ny = curr.y + dy;
@@ -1371,7 +1357,7 @@ function generateDungeon() {
         const branch = branches[i]; branches.splice(i, 1);
         
         let possibleDirs = [0,1,2,3].filter(d => d !== (branch.parentDir + 2) % 4);
-        shuffleArray(possibleDirs, rnd); // Fisher-Yates shuffle
+        shuffleArray(possibleDirs, rnd); 
         
         let added = 0;
         for (const dir of possibleDirs) {
@@ -1437,7 +1423,7 @@ function carveCorridor(startX, startY, dirIdx, length, width) {
 }
 
 function placeDaughter() {
-    const sortedRooms = [...rooms].sort((a, b) => a.y - b.y);
+    const sortedRooms = [...rooms].sort((a, b) => (a.y - b.y) || (a.x - b.x));
     let targetRoom = sortedRooms.length >= 3 ? sortedRooms[Math.floor(rnd.nextFloat() * 2)] : sortedRooms[0]; 
     let candidates = [];
     for (let dy = 0; dy < targetRoom.h; dy++) for (let dx = 0; dx < targetRoom.w; dx++) {
@@ -1523,7 +1509,7 @@ function updateGoblin(g, now) {
     if (g.state === STATE.DYING) {
         const elapsed = now - g.deathTime;
         const FADE_START_DELAY = 1500; 
-        const FADE_DURATION = 1000;        
+        const FADE_DURATION = 1000;           
 
         if (elapsed < 500) {
             g.deathAngle = (elapsed / 500) * (Math.PI / 2) * g.deathDir;
@@ -1577,7 +1563,7 @@ function updateGoblin(g, now) {
         setGoblinState(g, STATE.ALERT, now); g.targetPlayer = sensedPlayer;
     } else if (g.state === STATE.IDLE && canMove) { 
         const dirs = DIRS.map((d, i) => ({d, i}));
-        shuffleArray(dirs, rnd); // シャッフル修正
+        shuffleArray(dirs, rnd); 
         for (const {d: [dx, dy], i} of dirs) {
             const nx = g.x + dx, ny = g.y + dy;
             if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && grid[ny][nx] === 1 && !isBlockedForGoblin(nx, ny)) {
@@ -1831,7 +1817,7 @@ function updateGrey(g, now) {
         
         if (!moved) {
             const dirs = DIRS.map((d, i) => ({d, i}));
-            shuffleArray(dirs, rnd); // シャッフル修正
+            shuffleArray(dirs, rnd); 
             for (const {d: [dx, dy], i} of dirs) {
                 const nx = g.x + dx, ny = g.y + dy;
                 if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && grid[ny][nx] === 1 && !isBlockedForGoblin(nx, ny)) {
@@ -1979,6 +1965,7 @@ function movePlayer(p, dx, dy) {
             healingBiscuit.active = false;
             if (p === player1) hpP1 = 10; else hpP2 = 10;
             playElectronicBlip();
+            if (isHost && conn && conn.open) { conn.send({type: 'SE', name: 'blip'}); }
         }
 
         if (!foundDaughter && nx === daughter.x && ny === daughter.y) {
@@ -2026,18 +2013,15 @@ function playerAttack(p) {
         }
     });
     const other = p === player1 ? player2 : player1;
-    // FF設定がONの場合のみ味方にダメージ
     if (isFriendlyFire && (p===player1?hpP2>0:hpP1>0) && other.x === tx && other.y === ty) { 
         damagePlayer(other, 3); hit = true; 
     }
 
-    // 攻撃音再生 (ヒット時か素振りか)
-    // FF=OFFで味方を殴った場合はヒット音を鳴らさない(素振り音)
     const hitAnything = hit; 
     playSE(p===player1 ? SE.playerAttack1 : SE.playerAttack2, hitAnything?0.8:0.5, 0.05);
     
-    const ex = tx + 0.5 + (rnd.nextFloat()-0.5)*0.2;
-    const ey = ty + 0.5 + (rnd.nextFloat()-0.5)*0.2;
+    const ex = tx + 0.5 + (Math.random()-0.5)*0.2;
+    const ey = ty + 0.5 + (Math.random()-0.5)*0.2;
     
     if (isHost && conn && conn.open) {
         conn.send({
@@ -2247,7 +2231,7 @@ function drawGameScreen() {
     [player1, player2].forEach(p => {
         const isP2 = p === player2;
         const isDead = (hpP1 <= 0 || hpP2 <= 0) || isGameOver; 
-        const shake = (now - p.hitShakeTime < HIT_SHAKE_DURATION) ? (rnd.nextFloat()*6-3) : 0; 
+        const shake = (now - p.hitShakeTime < HIT_SHAKE_DURATION) ? (Math.random()*6-3) : 0; 
         
         let img = playerImages.front;
         let sx = 1;
@@ -2465,7 +2449,7 @@ function drawAnalogClock() {
 
     let currentRad;
     if (t >= maxTime) {
-        const shake = (rnd.nextFloat() - 0.5) * 0.2; 
+        const shake = (Math.random() - 0.5) * 0.2; 
         currentRad = angleMax + shake;
     } else {
         currentRad = startAngle + (t / maxTime) * totalRad;
@@ -2506,7 +2490,7 @@ function drawHeartsUI() {
     
     for (let i = 0; i < 10; i++) {
         const row = Math.floor(i / 5); 
-        const col = i % 5;                 
+        const col = i % 5;                  
         const x = startX + col * spacingX;
         const y = startY + row * spacingY;
         
@@ -2644,7 +2628,7 @@ function renderFloorCanvas() {
     
     const grad = floorCtx.createLinearGradient(0, gradYStart, 0, gradYEnd);
     grad.addColorStop(0, isGreyMode ? "rgba(0, 255, 100, 0.8)" : "rgba(255, 255, 200, 0.8)"); 
-    grad.addColorStop(1, isGreyMode ? "rgba(0, 255, 100, 0)" : "rgba(255, 255, 200, 0)");        
+    grad.addColorStop(1, isGreyMode ? "rgba(0, 255, 100, 0)" : "rgba(255, 255, 200, 0)");          
     
     floorCtx.fillStyle = grad;
     floorCtx.fillRect(startLeftX*SCALED_TILE, gradYEnd, SCALED_TILE*2, SCALED_TILE*3);
@@ -2716,6 +2700,7 @@ function handleDown(e) {
         if(pos.x > 300 && pos.x < 700 && pos.y > 200 && pos.y < 450) { 
             gameState='matching'; 
             titleBGM.play().catch(()=>{}); 
+            setTimeout(updateInputPosition, 0);
         }
     }
     else if (gameState === 'matching') {
@@ -2732,6 +2717,7 @@ function handleDown(e) {
                 nameEl.disabled = false;
                 passEl.disabled = false;
                 if (peer) { peer.destroy(); peer = null; }
+                updateInputPosition(); 
             } else {
                 if(nameEl.value && passEl.value) {
                     playClickSound(); 
@@ -2745,12 +2731,10 @@ function handleDown(e) {
             }
         }
         
-        // デバッグモードボタン (右下)
         if (!isMatching && !isConnected && pos.x > VIRTUAL_WIDTH - 150 && pos.x < VIRTUAL_WIDTH - 50 && pos.y > VIRTUAL_HEIGHT - 80) {
             startDungeonGame(true); 
         }
 
-        // FF設定ボタン (左下)
         if (!isMatching && !isConnected && pos.x > 50 && pos.x < 190 && pos.y > VIRTUAL_HEIGHT - 80) {
             isFriendlyFire = !isFriendlyFire;
             safeSetItem('goblinsNest_isFF', isFriendlyFire);
@@ -2795,10 +2779,12 @@ window.addEventListener('mouseup', saveVolume);
 canvas.addEventListener('touchstart', (e) => { if(gameState!=='game') { e.preventDefault(); handleDown(e); } }, {passive:false});
 window.addEventListener('touchend', saveVolume);
 
-nameEl.addEventListener('input', () => {
+nameEl.addEventListener('input', (e) => {
+    if (e.isComposing) return;
     safeSetItem('goblinsNest_name', nameEl.value);
 });
-passEl.addEventListener('input', () => {
+passEl.addEventListener('input', (e) => {
+    if (e.isComposing) return;
     passEl.value = passEl.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)).replace(/[^a-zA-Z0-9]/g, '');
     safeSetItem('goblinsNest_pass', passEl.value);
 });
@@ -2893,8 +2879,18 @@ window.addEventListener('keydown', (e) => {
             }
             if (keys['z'] || keys['Z']) {
                 if (conn && conn.open) conn.send({ type: 'ATTACK' });
-                // Ver.2.9: ゲスト側の攻撃即時フィードバック (空振り音)
+                // 即時フィードバック: 音とエフェクト
                 playSE(SE.playerAttack2, 0.5, 0.05);
+                // 即時エフェクト描画 (Guest側)
+                const p = player2;
+                const [adx, ady] = DIRS[p.facing];
+                const tx = p.x + adx, ty = p.y + ady;
+                const ex = tx + 0.5 + (Math.random()-0.5)*0.2;
+                const ey = ty + 0.5 + (Math.random()-0.5)*0.2;
+                attackEffects.push({
+                    x: ex, y: ey,
+                    type: 'player', owner: 'p2', dir: p.facing, startTime: performance.now(), duration: 100
+                });
             }
         }
     } else if (gameState === 'title') {
@@ -2903,6 +2899,7 @@ window.addEventListener('keydown', (e) => {
              
              gameState='matching'; 
              titleBGM.play().catch(()=>{});
+             setTimeout(updateInputPosition, 0);
         }
     }
 });
@@ -2920,6 +2917,7 @@ window.addEventListener('blur', () => {
 function initPeer(password) {
     if (peer) return;
     isMatching = true;
+    updateInputPosition();
     
     const myId = PEER_ID_PREFIX + hashCode(password); 
     
@@ -2935,6 +2933,7 @@ function initPeer(password) {
             connectAsGuest(myId);
         } else {
             isMatching = false;
+            updateInputPosition();
             alert("通信エラーが発生しました。合言葉を変えて試してください。");
         }
     });
@@ -2970,7 +2969,7 @@ function connectAsGuest(baseId) {
     peer.on('open', () => {
         isHost = false;
         conn = peer.connect(hostId);
-        if(!conn) { alert("ホストが見つかりません"); isMatching=false; return; }
+        if(!conn) { alert("ホストが見つかりません"); isMatching=false; updateInputPosition(); return; }
         setupConnection();
     });
 }
@@ -2979,6 +2978,7 @@ function setupConnection() {
     conn.on('open', () => {
         isConnected = true;
         isMatching = false; 
+        updateInputPosition();
         if (!isHost) {
             conn.send({ type: 'NAME', name: nameEl.value });
         }
@@ -2987,10 +2987,8 @@ function setupConnection() {
     conn.on('data', (data) => {
         if (isHost) {
             if (data.type === 'MOVE') {
-                // 入力消失修正: キューへ蓄積
                 guestInputQueue.push({ type: 'MOVE', dx: data.dx, dy: data.dy });
             } else if (data.type === 'ATTACK') {
-                // 入力消失修正: キューへ蓄積
                 guestInputQueue.push({ type: 'ATTACK' });
             } else if (data.type === 'SIGNAL') {
                 if (isGameOver || gameCleared) {
@@ -3008,8 +3006,14 @@ function setupConnection() {
             else if (data.type === 'NAME') {
                 otherPlayerName = data.name;
             }
+            else if (data.type === 'SE') {
+                if (data.name === 'blip') playElectronicBlip();
+            }
         } else {
             if (data.type === 'SYNC') {
+                const prevGameOver = isGameOver;
+                const prevGameClear = gameCleared;
+
                 player1.x = data.p1.x; player1.y = data.p1.y; player1.facing = data.p1.f; player1.stepCount = data.p1.sc;
                 player2.x = data.p2.x; player2.y = data.p2.y; player2.facing = data.p2.f; player2.stepCount = data.p2.sc;
                 hpP1 = data.hp.p1; hpP2 = data.hp.p2;
@@ -3026,12 +3030,12 @@ function setupConnection() {
 
                 if (goblins.length !== data.g.length) goblins = new Array(data.g.length).fill({});
                 data.g.forEach((gData, i) => {
-                       goblins[i] = {
+                        goblins[i] = {
                            x: gData.x, y: gData.y, facing: gData.f, state: gData.s, hp: gData.hp, 
                            sizeScale: gData.sc, bobOffset: gData.bo, 
                            deathTime: gData.dt, deathAngle: gData.da, dissolveProgress: gData.dp,
                            isCasting: gData.ic
-                       };
+                        };
                 });
                 
                 signalState = data.sig;
@@ -3039,11 +3043,19 @@ function setupConnection() {
                 gameCleared = data.cl;
                 isGameOver = data.go;
                 isGreyMode = data.gm;
-                isFriendlyFire = data.ff; // FF設定をホストから受信して同期
+                isFriendlyFire = data.ff; 
                 
                 otherPlayerName = data.hn;
 
-                updateInputPosition();
+                if (!prevGameOver && isGameOver) {
+                    timerStopped = true;
+                    showResult();
+                }
+                if (!prevGameClear && gameCleared) {
+                    stopCurrentBgm(); 
+                    if (!isGreyMode) { clearBGM.play().catch(()=>{}); }
+                    showResult();
+                }
 
             } else if (data.type === 'START') {
                 startDungeonGame(false, { 
@@ -3051,23 +3063,23 @@ function setupConnection() {
                     colorIdx: data.colorIdx, 
                     normalIdx: data.normalIdx, 
                     rageIdx: data.rageIdx,
-                    playCount: data.playCount 
+                    playCount: data.playCount,
+                    ff: data.ff 
                 });
                 
             } else if (data.type === 'SPAWN_EFFECT') {
                 if (data.kind === 'goblin') {
-                      attackEffects.push({
-                          x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
-                      });
-                      const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); 
-                      playSE(SE.goblinAttack, 0.7, 0.15, pitch);
+                        attackEffects.push({
+                           x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
+                        });
+                        const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); 
+                        playSE(SE.goblinAttack, 0.7, 0.15, pitch);
                 } else if (data.kind === 'player') {
-                      attackEffects.push({
-                          x: data.x, y: data.y, type: 'player', owner: data.owner, dir: data.dir, startTime: performance.now(), duration: 100
-                      });
-                      // Ver.2.9: ゲストかつ自分の攻撃なら音を鳴らさない(即時再生済み)
                       const isMe = !isHost && data.owner === 'p2';
                       if (!isMe) {
+                          attackEffects.push({
+                              x: data.x, y: data.y, type: 'player', owner: data.owner, dir: data.dir, startTime: performance.now(), duration: 100
+                          });
                           playSE(data.owner==='p1'?SE.playerAttack1:SE.playerAttack2, 0.5, 0.05);
                       }
                 }
@@ -3077,6 +3089,8 @@ function setupConnection() {
                 playSE(data.target==='p1'?SE.playerHit1:SE.playerHit2, 0.9, 0.05);
             } else if (data.type === 'GO_TITLE') {
                 location.reload();
+            } else if (data.type === 'SE') {
+                if (data.name === 'blip') playElectronicBlip();
             }
         }
     });
