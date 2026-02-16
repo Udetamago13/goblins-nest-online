@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.9 Rev.4</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.9 Rev.5</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -503,7 +503,8 @@ function triggerWarpSequence() {
     }, 200);
 
     // Step 3: 次のステージへ (2.0秒後)
-    if (isHost) {
+    // ホストまたはデバッグモードなら実行
+    if (isHost || isDebugMode) {
         setTimeout(() => {
             // グレイデバッグ中なら次もグレイデバッグでループ
             startDungeonGame(isDebugMode, null, false, isGreyDebug); 
@@ -582,55 +583,61 @@ function update() {
             }
         }
 
-        if (isHost) {
-            // ホスト側：入力キュー消化
-            let processed = 0;
-            while (guestInputQueue.length > 0 && processed < 5) {
-                const input = guestInputQueue.shift();
-                if (input.type === 'MOVE') {
-                    movePlayer(player2, input.dx, input.dy);
-                } else if (input.type === 'ATTACK') {
-                    playerAttack(player2);
-                }
-                processed++;
-            }
-            
-            gameLoopStep(); 
-
-            if (conn && conn.open) {
-                const now = performance.now();
-                if (now - lastSyncTime > SYNC_INTERVAL) {
-                    const state = {
-                        type: 'SYNC',
-                        p1: { x: player1.x, y: player1.y, f: player1.facing, sc: player1.stepCount, dd: player1.deathDir },
-                        p2: { x: player2.x, y: player2.y, f: player2.facing, sc: player2.stepCount, dd: player2.deathDir },
-                        hp: { p1: hpP1, p2: hpP2 },
-                        d: { x: daughter.x, y: daughter.y, r: daughter.rescued, er: daughter.rescuer },
-                        b: { x: healingBiscuit.x, y: healingBiscuit.y, a: healingBiscuit.active },
-                        g: goblins.map(g => ({
-                            x: g.x, y: g.y, f: g.facing, s: g.state, hp: g.hp, 
-                            sc: g.sizeScale, bo: g.bobOffset,
-                            dt: g.deathTime, da: g.deathAngle, dp: g.dissolveProgress,
-                            ic: g.isCasting
-                        })),
-                        sig: signalState, 
-                        ret: retreatState,
-                        res: resultState, // リザルト状態同期
-                        t: (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime,
-                        cl: gameCleared,
-                        go: isGameOver,
-                        gm: isGreyMode,
-                        wp: isWarpSequence, // ワープ演出同期
-                        hn: nameEl.value,
-                        ff: isFriendlyFire
-                    };
-                    conn.send(state);
-                    lastSyncTime = now;
-                }
-            }
+        if (isDebugMode) {
+            // デバッグモード(予演/ソロ)なら直接ループ実行
+            // ホスト処理と同じように入力キュー消化も不要（ローカル入力のみ）
+            gameLoopStep();
         } else {
-            // ゲスト側はgameLoopStepを行わず同期データで描画のみ
-            // ただし単純なアニメーション等はgameLoopStepに入っていないのでupdate内で回る
+            // オンラインマルチ (Host/Guest)
+            if (isHost) {
+                // ホスト側：入力キュー消化
+                let processed = 0;
+                while (guestInputQueue.length > 0 && processed < 5) {
+                    const input = guestInputQueue.shift();
+                    if (input.type === 'MOVE') {
+                        movePlayer(player2, input.dx, input.dy);
+                    } else if (input.type === 'ATTACK') {
+                        playerAttack(player2);
+                    }
+                    processed++;
+                }
+                
+                gameLoopStep(); 
+
+                if (conn && conn.open) {
+                    const now = performance.now();
+                    if (now - lastSyncTime > SYNC_INTERVAL) {
+                        const state = {
+                            type: 'SYNC',
+                            p1: { x: player1.x, y: player1.y, f: player1.facing, sc: player1.stepCount, dd: player1.deathDir },
+                            p2: { x: player2.x, y: player2.y, f: player2.facing, sc: player2.stepCount, dd: player2.deathDir },
+                            hp: { p1: hpP1, p2: hpP2 },
+                            d: { x: daughter.x, y: daughter.y, r: daughter.rescued, er: daughter.rescuer },
+                            b: { x: healingBiscuit.x, y: healingBiscuit.y, a: healingBiscuit.active },
+                            g: goblins.map(g => ({
+                                x: g.x, y: g.y, f: g.facing, s: g.state, hp: g.hp, 
+                                sc: g.sizeScale, bo: g.bobOffset,
+                                dt: g.deathTime, da: g.deathAngle, dp: g.dissolveProgress,
+                                ic: g.isCasting
+                            })),
+                            sig: signalState, 
+                            ret: retreatState,
+                            res: resultState, // リザルト状態同期
+                            t: (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime,
+                            cl: gameCleared,
+                            go: isGameOver,
+                            gm: isGreyMode,
+                            wp: isWarpSequence, // ワープ演出同期
+                            hn: nameEl.value,
+                            ff: isFriendlyFire
+                        };
+                        conn.send(state);
+                        lastSyncTime = now;
+                    }
+                }
+            } else {
+                // ゲスト側はgameLoopStepを行わず同期データで描画のみ
+            }
         }
     }
 
