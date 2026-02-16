@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.4.2 (Whiteout)</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 3.3 (Sync Fix)</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -49,18 +49,6 @@
             image-rendering: pixelated; 
             --bright: 1.0; 
         }
-        
-        /* Whiteout Layer (Lightweight CSS Overlay) */
-        #whiteout-layer {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: white; 
-            opacity: 0; 
-            pointer-events: none; 
-            z-index: 50;
-            transition: opacity 1.5s ease-in; /* Default fade-in speed */
-        }
-        .whiteout-active { opacity: 1 !important; }
-        
         .game-input-area {
             position: absolute; background: transparent; border: none; outline: none;
             color: white; font-family: 'DotGothic16', sans-serif; text-align: center;
@@ -105,7 +93,6 @@
         </div>
 
         <canvas id="gameCanvas"></canvas>
-        <div id="whiteout-layer"></div>
         
         <textarea id="nameInput" class="game-input-area" maxlength="100"></textarea>
         <input type="text" id="passInput" class="game-input-line" maxlength="6">
@@ -135,28 +122,6 @@ class Xorshift {
         this.x = this.y; this.y = this.z; this.z = this.w;
         this.w = (this.w ^ (this.w >>> 19)) ^ (t ^ (t >>> 8));
         return (this.w >>> 0) / 4294967296;
-    }
-}
-
-class SoundPool {
-    constructor(src, poolSize = 5, volAdjust = 1.0) {
-        this.pool = [];
-        this.index = 0;
-        this.volAdjust = volAdjust;
-        for (let i = 0; i < poolSize; i++) {
-            const audio = new Audio(src);
-            audio.preload = 'auto';
-            this.pool.push(audio);
-        }
-    }
-    play(volume = 1.0, pitch = 1.0) {
-        if (isMutedSE) return;
-        const audio = this.pool[this.index];
-        this.index = (this.index + 1) % this.pool.length;
-        audio.currentTime = 0;
-        audio.volume = Math.min(1, volume * this.volAdjust * seVolume * 2);
-        audio.playbackRate = pitch;
-        audio.play().catch(() => {});
     }
 }
 
@@ -212,7 +177,6 @@ const passEl = document.getElementById('passInput');
 const uiLayer = document.getElementById('ui-layer');
 const infoPanel = document.getElementById('info-panel');
 const controlsHelpEl = document.getElementById('controls-help');
-const whiteoutLayer = document.getElementById('whiteout-layer');
 
 const gateScreen = document.getElementById('gate-screen');
 const gatePassInput = document.getElementById('gate-pass');
@@ -266,15 +230,11 @@ let lastSyncTime = 0;
 const SYNC_INTERVAL = 33; 
 
 let otherPlayerName = ""; 
-let lastNameSyncTime = 0;
 
 let isGreyMode = false;
 let isDebugMode = false; 
 let psychicArrays = []; 
 let currentBgmDebugName = ""; 
-
-let lastGeneratedStageData = null; 
-let isWhiteoutTransitioning = false; // Prevent multiple triggers
 
 const BAR_W = 80, BAR_H = 15;
 const UI_X = VIRTUAL_WIDTH - (BAR_W + 20), UI_Y_START = 30;
@@ -321,9 +281,9 @@ const visionHoleCanvas = document.createElement('canvas');
 visionHoleCanvas.width = visionSize; visionHoleCanvas.height = visionSize;
 const vhCtx = visionHoleCanvas.getContext('2d');
 const vhGrad = vhCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
-vhGrad.addColorStop(0, "rgba(0,0,0,1)");                  
+vhGrad.addColorStop(0, "rgba(0,0,0,1)");                 
 vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");        
-vhGrad.addColorStop(1, "rgba(0,0,0,0)");                  
+vhGrad.addColorStop(1, "rgba(0,0,0,0)");                 
 vhCtx.fillStyle = vhGrad;
 vhCtx.beginPath(); vhCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); vhCtx.fill();
 
@@ -398,14 +358,15 @@ const playerAttackImg = new Image(); playerAttackImg.src = 'assets/player/player
 const daughterImg = new Image(); daughterImg.src = 'assets/daughter/daughter.png';
 const biscuitImg = new Image(); biscuitImg.src = 'assets/items/biscuit.png';
 
-const SE_POOLS = {
-    goblinAttack: new SoundPool('assets/se/goblin_attack1.wav', 5),
-    goblinHit: new SoundPool('assets/se/goblin_hit1.wav', 5),
-    playerAttack1: new SoundPool('assets/se/player_attack1.wav', 3),
-    playerAttack2: new SoundPool('assets/se/player_attack2.wav', 3),
-    playerHit1: new SoundPool('assets/se/player_hit1.wav', 3),
-    playerHit2: new SoundPool('assets/se/player_hit2.wav', 3)
+const SE = {
+    goblinAttack: [new Audio('assets/se/goblin_attack1.wav'), new Audio('assets/se/goblin_attack2.wav')],
+    goblinHit: [new Audio('assets/se/goblin_hit1.wav'), new Audio('assets/se/goblin_hit2.wav')],
+    playerAttack1: new Audio('assets/se/player_attack1.wav'),
+    playerAttack2: new Audio('assets/se/player_attack2.wav'),
+    playerHit1: new Audio('assets/se/player_hit1.wav'),
+    playerHit2: new Audio('assets/se/player_hit2.wav')
 };
+Object.values(SE).flat().forEach(audio => { audio.preload = 'auto'; });
 
 let grid = [], floorVariant = [];
 let player1 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0, deathDir: 0};
@@ -486,17 +447,6 @@ function updateBrightnessFilter() {
     }
 } 
 
-function triggerWhiteout() {
-    whiteoutLayer.style.transition = "opacity 1.5s ease-in"; // Fade In (Slow)
-    whiteoutLayer.classList.add('whiteout-active');
-}
-
-function resolveWhiteout() {
-    whiteoutLayer.style.transition = "opacity 3.0s ease-out"; // Fade Out (Very Slow)
-    whiteoutLayer.classList.remove('whiteout-active');
-    isWhiteoutTransitioning = false;
-}
-
 function update() {
     if (gameState === 'gate') {
         requestAnimationFrame(update);
@@ -548,7 +498,7 @@ function update() {
              updateInfoText();
         }
 
-        if ((isHost || isDebugMode) && !isDebugMode && (hpP1 <= 0 || hpP2 <= 0) && !isGameOver && !isGreyMode && !isWhiteoutTransitioning) {
+        if ((isHost || isDebugMode) && !isDebugMode && (hpP1 <= 0 || hpP2 <= 0) && !isGameOver) {
             isGameOver = true;
             timerStopped = true;
             showResult();
@@ -568,9 +518,6 @@ function update() {
                             voteState.p2 = (voteState.p2 === 'restart') ? null : 'restart';
                         } else if (input.kind === 'RETURN') {
                             voteState.p2 = (voteState.p2 === 'return') ? null : 'return';
-                        } else if (input.kind === 'RETREAT') {
-                            voteState.p2 = (voteState.p2 === 'retreat') ? null : 'retreat';
-                            if (voteState.p2 === 'retreat') playChurchBell(); 
                         }
                         playClickSound(); 
                     }
@@ -580,14 +527,11 @@ function update() {
                 if (!agreedAction) {
                     if (voteState.p1 === 'restart' && voteState.p2 === 'restart') {
                         agreedAction = 'restart';
-                        setTimeout(() => startDungeonGame(false, lastGeneratedStageData), 500); 
+                        setTimeout(() => startDungeonGame(false), 500); 
                     } else if (voteState.p1 === 'return' && voteState.p2 === 'return') {
                         agreedAction = 'return';
                         if (conn && conn.open) conn.send({ type: 'GO_TITLE' });
                         setTimeout(() => location.reload(), 500);
-                    } else if (voteState.p1 === 'retreat' && voteState.p2 === 'retreat') {
-                        agreedAction = 'retreat';
-                        setTimeout(() => startDungeonGame(false, null), 500);
                     }
                 }
 
@@ -615,8 +559,7 @@ function update() {
                             go: isGameOver,
                             gm: isGreyMode,
                             hn: nameEl.value,
-                            ff: isFriendlyFire,
-                            wo: isWhiteoutTransitioning // Sync whiteout state
+                            ff: isFriendlyFire 
                         };
                         conn.send(state);
                         lastSyncTime = now;
@@ -624,11 +567,6 @@ function update() {
                 }
             } else {
                 const now = performance.now();
-                if (isConnected && now - lastNameSyncTime > 3000) {
-                    if (conn && conn.open) conn.send({ type: 'NAME', name: nameEl.value });
-                    lastNameSyncTime = now;
-                }
-
                  if (now - lastMinimapUpdate > MINIMAP_UPDATE_INTERVAL) {
                     updateMinimap();
                     lastMinimapUpdate = now;
@@ -686,7 +624,7 @@ function updateInputPosition() {
         }
     } else if (gameState === 'game') {
         if (isDebugMode) {
-             controlsHelpEl.innerText = "【P1】移動:矢印 攻撃:Z R:次へ 【P2】移動:WASD 攻撃:X | [DEBUG MODE]";
+             controlsHelpEl.innerText = "【P1】移動:矢印 攻撃:Z 【P2】移動:WASD 攻撃:X | [DEBUG MODE]";
         } else {
              if (isHost) {
                  controlsHelpEl.innerText = "【P1(あなた)】移動:矢印 攻撃:Z | 【P2(相棒)】操作待受中";
@@ -957,14 +895,16 @@ function enterRageBgm() {
     if (currentStageBgm.rage) { playAndFadeIn(currentStageBgm.rage, 0.5); currentMusicState = 'rage'; }
 }
 
-function playSE(poolOrName, volumeRatio = 0.6, pitchRand = 0.1, basePitch = 1.0) {
+function playSE(audioArrayOrSingle, volumeRatio = 0.6, pitchRand = 0.1, basePitch = 1.0) {
     if (isGreyMode) return; 
     if (isMutedSE) return;
 
-    if (poolOrName instanceof SoundPool) {
-        const pitch = basePitch + (Math.random() - 0.5) * pitchRand;
-        poolOrName.play(volumeRatio, pitch);
-    }
+    const audio = Array.isArray(audioArrayOrSingle) ? audioArrayOrSingle[Math.floor(Math.random() * audioArrayOrSingle.length)] : audioArrayOrSingle;
+    const clone = audio.cloneNode();
+    clone.currentTime = 0;
+    clone.volume = Math.min(1, volumeRatio * seVolume * 2); 
+    clone.playbackRate = basePitch + (Math.random() - 0.5) * pitchRand;
+    clone.play().catch(() => {});
 }
 
 function playElectronicBlip() {
@@ -1075,9 +1015,6 @@ function calculateShortestPath() {
 function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     isDebugMode = debugFlag; 
     guestInputQueue = []; 
-    
-    // Ver.4.2 Whiteout Resolution
-    resolveWhiteout();
 
     const prefix = isDebugMode ? S_KEY_PREFIX_DEBUG : S_KEY_PREFIX_REAL;
     
@@ -1114,15 +1051,6 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
         playCount++;
         saveSessionData(prefix); 
     }
-
-    lastGeneratedStageData = {
-        seed: seedVal,
-        colorIdx: selectedColorIdx,
-        normalIdx: selectedNormalIdx,
-        rageIdx: selectedRageIdx,
-        playCount: playCount,
-        ff: isFriendlyFire
-    };
 
     rnd = new Xorshift(seedVal);
     currentStageColor = FLOOR_COLORS_56[selectedColorIdx];
@@ -1915,7 +1843,7 @@ function tryGoblinAttack(g, target, now) {
 
     const pitch = g.isGiant ? 0.4 : 1.0;
     const vol = g.isGiant ? 0.7 * 1.2 : 0.7;
-    playSE(SE_POOLS.goblinAttack, vol, 0.15, pitch);
+    playSE(SE.goblinAttack, vol, 0.15, pitch);
 
     damagePlayer(target, 1); 
 
@@ -1941,7 +1869,7 @@ function damagePlayer(p, amount) {
     else { hpP2 = Math.max(0, hpP2 - amount); p2LastHitTime = now; }
     
     p.hitShakeTime = now;
-    playSE(p===player1 ? SE_POOLS.playerHit1 : SE_POOLS.playerHit2, 0.9, 0.05);
+    playSE(p===player1 ? SE.playerHit1 : SE.playerHit2, 0.9, 0.05);
 
     if (conn && conn.open) {
         conn.send({
@@ -1951,28 +1879,12 @@ function damagePlayer(p, amount) {
     }
 
     if (hpP1 <= 0 || hpP2 <= 0) {
-        if (isGreyMode) {
-             if ((isHost || isDebugMode) && !isGameOver && !gameCleared && !isWhiteoutTransitioning) {
-                 isWhiteoutTransitioning = true;
-                 
-                 // Notify Grey Reset (Whiteout)
-                 if (conn && conn.open) conn.send({type: 'GREY_RESET_START'});
-                 triggerWhiteout();
-                 
-                 setTimeout(() => {
-                     // Generate new dungeon while screen is white
-                     startDungeonGame(false, null);
-                     isWhiteoutTransitioning = false;
-                 }, 2000);
-             }
-        } else {
-            if (!isDebugMode && !isGameOver && !gameCleared) {
-                isGameOver = true; timerStopped = true;
-                player1.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
-                player2.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
-                
-                showResult();
-            }
+        if (!isDebugMode && !isGameOver && !gameCleared) {
+            isGameOver = true; timerStopped = true;
+            player1.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
+            player2.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
+            
+            showResult();
         }
     }
 } 
@@ -2034,7 +1946,7 @@ function playerAttack(p) {
             if (!isGreyMode) {
                 const pitch = g.isGiant ? 0.4 : 1.0;
                 const vol = g.isGiant ? 0.8 * 1.2 : 0.8;
-                playSE(SE_POOLS.goblinHit, vol, 0.1, pitch);
+                playSE(SE.goblinHit, vol, 0.1, pitch);
             }
             if (g.hp <= 0) { 
                 g.state = STATE.DYING;
@@ -2050,7 +1962,7 @@ function playerAttack(p) {
     }
 
     const hitAnything = hit; 
-    playSE(p===player1 ? SE_POOLS.playerAttack1 : SE_POOLS.playerAttack2, hitAnything?0.8:0.5, 0.05);
+    playSE(p===player1 ? SE.playerAttack1 : SE.playerAttack2, hitAnything?0.8:0.5, 0.05);
     
     const ex = tx + 0.5 + (Math.random()-0.5)*0.2;
     const ey = ty + 0.5 + (Math.random()-0.5)*0.2;
@@ -2069,6 +1981,7 @@ function playerAttack(p) {
 } 
 
 function checkClear() {
+    // 【修正点1】ゲストにはクリア判定をさせない（鉄の掟・参）
     if (!isHost && !isDebugMode) return;
 
     const isP1Home = player1.y === startBottomY && (player1.x === startLeftX || player1.x === startRightX);
@@ -2379,7 +2292,6 @@ function drawGameScreen() {
     }
     drawHeartsUI();
     
-    // Result Screen Voting
     if (isGameOver || gameCleared) {
         const myVote = (isHost || isDebugMode) ? voteState.p1 : voteState.p2;
         const otherVote = (isHost || isDebugMode) ? voteState.p2 : voteState.p1;
@@ -2451,60 +2363,6 @@ function drawGameScreen() {
         const leftLabel = gameCleared ? "続行" : "再起";
         drawVoteBtn(RESTART_X, RESTART_Y, 'restart', leftLabel);
         drawVoteBtn(RETURN_X, RETURN_Y, 'return', "帰還");
-    } else if (!isGameOver && !gameCleared && !isDebugMode && gameState === 'game') {
-        // Retreat Button Logic
-        const myVote = (isHost || isDebugMode) ? voteState.p1 : voteState.p2;
-        const otherVote = (isHost || isDebugMode) ? voteState.p2 : voteState.p1;
-        const isBlink = Math.floor(Date.now() / 400) % 2 === 0;
-        
-        const x = 120, y = VIRTUAL_HEIGHT - 50;
-        const w = 120, h = 50;
-        
-        const isMyVote = myVote === 'retreat';
-        const isOtherVote = otherVote === 'retreat';
-        const isAgreed = isMyVote && isOtherVote;
-
-        let text = "撤退";
-        let style = "normal";
-
-        if (isAgreed) {
-            text = "合意"; style = "agreed";
-        } else if (isMyVote) {
-            text = "提案"; style = "pending";
-        } else if (isOtherVote) {
-            text = "要請"; style = "request";
-        }
-
-        ctx.save();
-        ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.font = "24px 'DotGothic16'";
-        
-        if (style === "agreed") {
-            ctx.fillStyle = "#ff0000"; ctx.fillRect(x - w/2, y - h/2, w, h);
-            ctx.strokeStyle = "#ffaaaa"; ctx.lineWidth = 4; ctx.strokeRect(x - w/2, y - h/2, w, h);
-            ctx.fillStyle = "white";
-        } else if (style === "pending") {
-            if (isBlink) {
-                ctx.strokeStyle = "#ffff00"; ctx.lineWidth = 4; ctx.strokeRect(x - w/2, y - h/2, w, h);
-                ctx.fillStyle = "#ffff00";
-            } else {
-                ctx.strokeStyle = "#555"; ctx.lineWidth = 4; ctx.strokeRect(x - w/2, y - h/2, w, h);
-                ctx.fillStyle = "#888";
-            }
-        } else if (style === "request") {
-            if (isBlink) {
-                ctx.strokeStyle = "#00ffff"; ctx.lineWidth = 4; ctx.strokeRect(x - w/2, y - h/2, w, h);
-                ctx.fillStyle = "#00ffff";
-            } else {
-                ctx.strokeStyle = "#555"; ctx.lineWidth = 4; ctx.strokeRect(x - w/2, y - h/2, w, h);
-                ctx.fillStyle = "#888";
-            }
-        } else {
-            ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 2; ctx.strokeRect(x - w/2, y - h/2, w, h);
-            ctx.fillStyle = "rgba(255,255,255,0.5)";
-        }
-        ctx.fillText(text, x, y - 2);
-        ctx.restore();
     }
 } 
 
@@ -2563,8 +2421,7 @@ window.addEventListener('keydown', (e) => {
         const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
 
         if (isHost || isDebugMode) {
-            // Instant Reset Logic for Grey Mode prevents effectiveGameOver check blocking input
-            if (!isDebugMode && !isGreyMode && (effectiveGameOver || gameCleared)) return; 
+            if (!isDebugMode && (effectiveGameOver || gameCleared)) return; 
 
             let dx = 0, dy = 0;
             if (keys['ArrowUp']) dy = -1;
@@ -2574,10 +2431,6 @@ window.addEventListener('keydown', (e) => {
             
             if (dx !== 0 || dy !== 0) movePlayer(player1, dx, dy);
             if (keys['z'] || keys['Z']) playerAttack(player1);
-            
-            if (isDebugMode && (keys['r'] || keys['R'])) {
-                 startDungeonGame(true, null);
-            }
 
             if (isDebugMode) {
                 let d2x = 0, d2y = 0;
@@ -2602,7 +2455,9 @@ window.addEventListener('keydown', (e) => {
             }
             if (keys['z'] || keys['Z']) {
                 if (conn && conn.open) conn.send({ type: 'ATTACK' });
-                playSE(SE_POOLS.playerAttack2, 0.5, 0.05);
+                // 即時フィードバック: 音とエフェクト
+                playSE(SE.playerAttack2, 0.5, 0.05);
+                // 即時エフェクト描画 (Guest側)
                 const p = player2;
                 const [adx, ady] = DIRS[p.facing];
                 const tx = p.x + adx, ty = p.y + ady;
@@ -2758,19 +2613,7 @@ function setupConnection() {
                 
                 otherPlayerName = data.hn;
 
-                // Sync Whiteout state from Host
-                if (data.wo && !isWhiteoutTransitioning) {
-                    triggerWhiteout();
-                    isWhiteoutTransitioning = true;
-                } else if (!data.wo && isWhiteoutTransitioning) {
-                    resolveWhiteout();
-                }
-
-                if (data.type === 'GREY_RESET_START') {
-                    // Force whiteout locally (redundant but safe)
-                    triggerWhiteout();
-                }
-
+                // 【修正点2】表示の強制保証（ゲームオーバー時）
                 if (isGameOver) {
                     timerStopped = true;
                     const rankEl = document.getElementById('result-rank');
@@ -2784,7 +2627,7 @@ function setupConnection() {
                     if (!isGreyMode) { clearBGM.play().catch(()=>{}); }
                     showResult();
                 }
-
+                // 【修正点3】表示の強制保証（クリア時）
                 if (gameCleared) {
                     const rankEl = document.getElementById('result-rank');
                     if (rankEl.style.display === 'none') {
@@ -2810,26 +2653,24 @@ function setupConnection() {
                            x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
                         });
                         const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); 
-                        playSE(SE_POOLS.goblinAttack, 0.7, 0.15, pitch);
+                        playSE(SE.goblinAttack, 0.7, 0.15, pitch);
                 } else if (data.kind === 'player') {
                       const isMe = !isHost && data.owner === 'p2';
                       if (!isMe) {
                           attackEffects.push({
                               x: data.x, y: data.y, type: 'player', owner: data.owner, dir: data.dir, startTime: performance.now(), duration: 100
                           });
-                          playSE(data.owner==='p1'?SE_POOLS.playerAttack1:SE_POOLS.playerAttack2, 0.5, 0.05);
+                          playSE(data.owner==='p1'?SE.playerAttack1:SE.playerAttack2, 0.5, 0.05);
                       }
                 }
             } else if (data.type === 'PLAYER_HIT') {
                 const p = data.target === 'p1' ? player1 : player2;
                 p.hitShakeTime = performance.now();
-                playSE(data.target==='p1'?SE_POOLS.playerHit1:SE_POOLS.playerHit2, 0.9, 0.05);
+                playSE(data.target==='p1'?SE.playerHit1:SE.playerHit2, 0.9, 0.05);
             } else if (data.type === 'GO_TITLE') {
                 location.reload();
             } else if (data.type === 'SE') {
                 if (data.name === 'blip') playElectronicBlip();
-            } else if (data.type === 'GREY_RESET_START') {
-                triggerWhiteout();
             }
         }
     });
@@ -2838,77 +2679,6 @@ function setupConnection() {
         alert("相手との接続が切れました");
         location.reload();
     });
-}
-
-function handleDown(e) {
-    if (gameState === 'title') {
-    } else if (gameState === 'matching') {
-        const pos = getMousePos(e);
-        const BTN_CENTER_Y = 440 + 30;
-        if (Math.abs(pos.x - VIRTUAL_WIDTH/2) < 80 && Math.abs(pos.y - BTN_CENTER_Y) < 30) {
-            playClickSound();
-            if (isConnected) {
-                if (isHost && conn && conn.open) {
-                    startDungeonGame(false);
-                }
-            } else if (isMatching) {
-                isMatching = false; 
-                if(peer) peer.destroy(); peer = null; conn = null;
-                updateInputPosition();
-            } else {
-                initPeer(passEl.value);
-            }
-        }
-        const FF_BTN_CENTER_Y = VIRTUAL_HEIGHT - 80 + 20;
-        if (!isConnected && Math.abs(pos.x - 120) < 70 && Math.abs(pos.y - FF_BTN_CENTER_Y) < 20) {
-            isFriendlyFire = !isFriendlyFire;
-            safeSetItem('goblinsNest_isFF', isFriendlyFire);
-            playClickSound();
-            updateInputPosition();
-        }
-        const DEBUG_BTN_CENTER_Y = VIRTUAL_HEIGHT - 80 + 20;
-        if (!isConnected && Math.abs(pos.x - (VIRTUAL_WIDTH - 100)) < 50 && Math.abs(pos.y - DEBUG_BTN_CENTER_Y) < 20) {
-            startDungeonGame(true);
-        }
-        
-    } else if (gameState === 'game') {
-        const pos = getMousePos(e);
-        if (pos.y < 60 && pos.x > UI_X) {
-            if (pos.y < 30 + BAR_H) isDraggingBGM = true;
-            else if (pos.y < 30 + BAR_H*2 + 15) isDraggingSE = true;
-            else if (pos.y < 30 + BAR_H*3 + 30) { isDraggingBright = true; updateBrightnessFilter(); }
-            saveVolume();
-            return;
-        }
-
-        if (isGameOver || gameCleared) {
-            const RESTART_X = 200, RESTART_Y = VIRTUAL_HEIGHT - 60;
-            const RETURN_X = VIRTUAL_WIDTH - 200, RETURN_Y = VIRTUAL_HEIGHT - 60;
-            
-            if (Math.abs(pos.x - RESTART_X) < 80 && Math.abs(pos.y - RESTART_Y) < 30) {
-                if (isHost || isDebugMode) voteState.p1 = (voteState.p1 === 'restart') ? null : 'restart';
-                else if (conn && conn.open) conn.send({type: 'VOTE', kind: 'RESTART'});
-                playClickSound();
-            }
-            if (Math.abs(pos.x - RETURN_X) < 80 && Math.abs(pos.y - RETURN_Y) < 30) {
-                if (isHost || isDebugMode) voteState.p1 = (voteState.p1 === 'return') ? null : 'return';
-                else if (conn && conn.open) conn.send({type: 'VOTE', kind: 'RETURN'});
-                playClickSound();
-            }
-        } else if (!isDebugMode) {
-            // Retreat Button
-            const RETREAT_X = 120, RETREAT_Y = VIRTUAL_HEIGHT - 50;
-            if (Math.abs(pos.x - RETREAT_X) < 60 && Math.abs(pos.y - RETREAT_Y) < 25) {
-                if (isHost) {
-                    voteState.p1 = (voteState.p1 === 'retreat') ? null : 'retreat';
-                    if (voteState.p1 === 'retreat') playChurchBell();
-                } else if (conn && conn.open) {
-                    conn.send({type: 'VOTE', kind: 'RETREAT'});
-                    playClickSound(); 
-                }
-            }
-        }
-    }
 }
 
 update();
