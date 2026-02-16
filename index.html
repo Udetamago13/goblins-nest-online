@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 3.3 (Sync Fix)</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 3.3.1 (Complete)</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -398,10 +398,8 @@ let minimapFloorCtx = minimapFloorCanvas.getContext('2d');
 let minimapFloorDrawn = false;
 let lastMinimapUpdate = 0;
 
-let voteState = {
-    p1: null,
-    p2: null
-};
+// 投票システムの状態
+let voteState = { p1: null, p2: null };
 let agreedAction = null; 
 
 if (safeGetItem('goblinsNest_gatePassed')) {
@@ -642,8 +640,14 @@ function draw() {
     if (gameState === 'game') {
         drawGameScreen();
     } else {
-        if (titleBgImg.complete) ctx.drawImage(titleBgImg, 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
-        else { ctx.fillStyle="#222"; ctx.fillRect(0,0,VIRTUAL_WIDTH,VIRTUAL_HEIGHT); }
+        // 画像読み込みエラー対策：とりあえず背景を塗る
+        ctx.fillStyle = "#222"; 
+        ctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        
+        if (titleBgImg.complete && titleBgImg.naturalWidth !== 0) {
+            ctx.drawImage(titleBgImg, 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        }
+
         if (gameState === 'title') drawTitleScreen();
         else if (gameState === 'matching') drawMatchingScreen();
     }
@@ -1981,7 +1985,6 @@ function playerAttack(p) {
 } 
 
 function checkClear() {
-    // 【修正点1】ゲストにはクリア判定をさせない（鉄の掟・参）
     if (!isHost && !isDebugMode) return;
 
     const isP1Home = player1.y === startBottomY && (player1.x === startLeftX || player1.x === startRightX);
@@ -2366,6 +2369,127 @@ function drawGameScreen() {
     }
 } 
 
+function handleDown(e) {
+    if (gameState === 'gate') return;
+
+    const pos = getMousePos(e);
+    
+    const volAreaX = UI_X - 60; 
+    
+    if (pos.x >= volAreaX && pos.x <= UI_X + BAR_W + 10) {
+        if (pos.x < UI_X && pos.y >= UI_Y_START && pos.y <= UI_Y_START + BAR_H) {
+            isMutedBGM = !isMutedBGM;
+            safeSetItem('goblinsNest_muteBGM', isMutedBGM);
+            return;
+        }
+        if (pos.y >= UI_Y_START - 5 && pos.y <= UI_Y_START + BAR_H + 5) {
+            isDraggingBGM = true;
+        }
+    }
+    
+    if (pos.x >= volAreaX && pos.x <= UI_X + BAR_W + 10) {
+        if (pos.x < UI_X && pos.y >= UI_Y_START + 35 && pos.y <= UI_Y_START + 35 + BAR_H) {
+            isMutedSE = !isMutedSE;
+            safeSetItem('goblinsNest_muteSE', isMutedSE);
+            return;
+        }
+        if (pos.y >= UI_Y_START + 30 && pos.y <= UI_Y_START + 30 + BAR_H + 5) {
+            isDraggingSE = true;
+        }
+    }
+
+    if (pos.x >= volAreaX && pos.x <= UI_X + BAR_W + 10) {
+        if (pos.y >= UI_Y_START + 65 && pos.y <= UI_Y_START + 65 + BAR_H + 5) {
+            isDraggingBright = true;
+        }
+    }
+
+    if (gameState === 'title') { 
+        if (isInputLocked) return;
+        
+        if(pos.x > 300 && pos.x < 700 && pos.y > 200 && pos.y < 450) { 
+            gameState='matching'; 
+            titleBGM.play().catch(()=>{}); 
+            setTimeout(updateInputPosition, 0);
+        }
+    }
+    else if (gameState === 'matching') {
+        if (pos.x > VIRTUAL_WIDTH/2 - 80 && pos.x < VIRTUAL_WIDTH/2 + 80 && pos.y > 440 && pos.y < 500) {
+            
+            if (isConnected) {
+                if (isHost) {
+                    playChurchBell(); 
+                    startDungeonGame(false); 
+                } else {
+                }
+            } else if (isMatching) {
+                isMatching = false;
+                nameEl.disabled = false;
+                passEl.disabled = false;
+                if (peer) { peer.destroy(); peer = null; }
+                updateInputPosition(); 
+            } else {
+                if(nameEl.value && passEl.value) {
+                    playClickSound(); 
+                    safeSetItem('goblinsNest_name', nameEl.value);
+                    safeSetItem('goblinsNest_pass', passEl.value);
+                    initPeer(passEl.value);
+                }
+            }
+            if (document.activeElement === nameEl || document.activeElement === passEl) {
+                nameEl.blur(); passEl.blur();
+            }
+        }
+        
+        if (!isMatching && !isConnected && pos.x > VIRTUAL_WIDTH - 150 && pos.x < VIRTUAL_WIDTH - 50 && pos.y > VIRTUAL_HEIGHT - 80) {
+            startDungeonGame(true); 
+        }
+
+        if (!isMatching && !isConnected && pos.x > 50 && pos.x < 190 && pos.y > VIRTUAL_HEIGHT - 80) {
+            isFriendlyFire = !isFriendlyFire;
+            safeSetItem('goblinsNest_isFF', isFriendlyFire);
+            playClickSound();
+        }
+    }
+    else if (gameState === 'game') {
+        if (!isDebugMode && (isGameOver || gameCleared) && !agreedAction) {
+            const RESTART_X = 200, RESTART_Y = VIRTUAL_HEIGHT - 60;
+            const RETURN_X = VIRTUAL_WIDTH - 200, RETURN_Y = VIRTUAL_HEIGHT - 60;
+            const w = 160, h = 60;
+
+            const isRestart = (pos.x > RESTART_X - w/2 && pos.x < RESTART_X + w/2 && pos.y > RESTART_Y - h/2 && pos.y < RESTART_Y + h/2);
+            const isReturn = (pos.x > RETURN_X - w/2 && pos.x < RETURN_X + w/2 && pos.y > RETURN_Y - h/2 && pos.y < RETURN_Y + h/2);
+
+            if (isHost) {
+                if (isRestart) {
+                    voteState.p1 = (voteState.p1 === 'restart') ? null : 'restart';
+                    playClickSound();
+                } else if (isReturn) {
+                    voteState.p1 = (voteState.p1 === 'return') ? null : 'return';
+                    playClickSound();
+                }
+            } else {
+                // Guest vote send
+                if (isRestart) {
+                    conn.send({ type: 'VOTE', kind: 'RESTART' });
+                    playClickSound();
+                } else if (isReturn) {
+                    conn.send({ type: 'VOTE', kind: 'RETURN' });
+                    playClickSound();
+                }
+            }
+        }
+        // Debug mode restart
+        else if (isDebugMode && (isGameOver || gameCleared)) {
+            const RESTART_X = 200, RESTART_Y = VIRTUAL_HEIGHT - 60;
+            const w = 160, h = 60;
+            if (pos.x > RESTART_X - w/2 && pos.x < RESTART_X + w/2 && pos.y > RESTART_Y - h/2 && pos.y < RESTART_Y + h/2) {
+                startDungeonGame(true);
+            }
+        }
+    }
+} 
+
 function getMousePos(e) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -2613,7 +2737,7 @@ function setupConnection() {
                 
                 otherPlayerName = data.hn;
 
-                // 【修正点2】表示の強制保証（ゲームオーバー時）
+                // 強制表示ロジック（Game Over）
                 if (isGameOver) {
                     timerStopped = true;
                     const rankEl = document.getElementById('result-rank');
@@ -2627,7 +2751,7 @@ function setupConnection() {
                     if (!isGreyMode) { clearBGM.play().catch(()=>{}); }
                     showResult();
                 }
-                // 【修正点3】表示の強制保証（クリア時）
+                // 強制表示ロジック（Clear）
                 if (gameCleared) {
                     const rankEl = document.getElementById('result-rank');
                     if (rankEl.style.display === 'none') {
