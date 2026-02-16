@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.8</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.9</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -2576,10 +2576,10 @@ function drawHeartsUI() {
         ctx.textBaseline = "middle";
         ctx.textAlign = "center";
         
-        // 左下(FFボタン)の右隣に配置
-        // FFボタン: x:50~190, y:VIRTUAL_HEIGHT-80
-        // 撤退ボタン: x:200~340, y:VIRTUAL_HEIGHT-80
-        const btnX = 200;
+        // 左下(FFボタン)のさらに左側に配置
+        // 以前のFFボタンは x:50, w:140 だったので、
+        // 今回の撤退ボタンを x:40, w:140 とし、左隅へ寄せる。
+        const btnX = 40;
         const btnY = VIRTUAL_HEIGHT - 80;
         const btnW = 140;
         const btnH = 40;
@@ -2859,7 +2859,7 @@ function handleDown(e) {
         
         // 撤退ボタン (ゲームオーバー/クリア/デバッグ以外)
         if (!effectiveGameOver && !gameCleared && !isDebugMode) {
-             const btnX = 200;
+             const btnX = 40;
              const btnY = VIRTUAL_HEIGHT - 80;
              const btnW = 140;
              const btnH = 40;
