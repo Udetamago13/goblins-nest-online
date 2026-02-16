@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 3.3.1 (Complete)</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.8</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -17,6 +17,7 @@
         #game-wrapper { position: relative; }
         #game-container { position: relative; width: 1024px; height: 576px; background: #111; overflow: hidden; box-shadow: 0 0 20px #333; }
         
+        /* 入場ゲート画面 */
         #gate-screen {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; z-index: 100;
@@ -72,8 +73,16 @@
             padding: 10px; background: rgba(0,0,0,0.7); border-radius: 8px; line-height: 1.6; 
             display: none; white-space: pre-wrap;
         }
+        #signal-message {
+            position: absolute; top: 35%; left: 50%; transform: translate(-50%, -50%);
+            color: #ff0; font-size: 28px; text-shadow: 1px 1px 0 #000;
+            opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 30;
+            background: rgba(0,0,0,0.6); padding: 10px 30px; border-radius: 15px; 
+            border: 2px solid rgba(255,255,255,0.5);
+            letter-spacing: 2px; text-align: center; white-space: pre-wrap;
+        }
         #result-rank {
-            position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             color: #fff; font-size: 28px; background: rgba(0,0,0,0.9); padding: 40px 60px;
             border-radius: 30px; display: none; text-align: center; line-height: 1.8;
             width: 80%; box-shadow: 0 0 30px #0ff; pointer-events: auto; z-index: 20;
@@ -99,10 +108,12 @@
 
         <div id="ui-layer">
             <div id="info-panel"></div>
+            <div id="signal-message"></div>
             <div id="result-rank">
                 <div id="guild-comment"></div>
                 <div id="rank-grade" style="font-size: 60px; color: #ff0; margin: 10px 0;"></div>
                 <div id="rank-time" style="font-size:20px; margin:20px 0;"></div>
+                <div id="restart-hint" style="font-size:16px; color:#aaa; margin-top:20px;"></div>
             </div>
         </div>
     </div>
@@ -110,6 +121,7 @@
 </div>
 
 <script>
+// --- Xorshift乱数生成クラス ---
 class Xorshift {
     constructor(seed = 88675123) {
         this.x = 123456789;
@@ -123,24 +135,20 @@ class Xorshift {
         this.w = (this.w ^ (this.w >>> 19)) ^ (t ^ (t >>> 8));
         return (this.w >>> 0) / 4294967296;
     }
-}
+} // --- Xorshift 終了 ---
 
+// --- Fisher-Yates Shuffle (ブラウザ依存回避) ---
 function shuffleArray(array, rng) {
     for (let i = array.length - 1; i > 0; i--) {
         const j = Math.floor(rng.nextFloat() * (i + 1));
         [array[i], array[j]] = [array[j], array[i]];
     }
     return array;
-}
+} // --- shuffleArray 終了 ---
 
-function shuffleArrayVisual(array) {
-    for (let i = array.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [array[i], array[j]] = [array[j], array[i]];
-    }
-}
-
+// --- 音響資源管理用シングルトン ---
 let sharedAudioCtx = null;
+
 function getSharedAudioContext() {
     if (!sharedAudioCtx) {
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -150,7 +158,7 @@ function getSharedAudioContext() {
         sharedAudioCtx.resume().catch(()=>{});
     }
     return sharedAudioCtx;
-}
+} // --- getSharedAudioContext 終了 ---
 
 function hashCode(str) {
     let hash = 0;
@@ -161,13 +169,23 @@ function hashCode(str) {
         hash |= 0; 
     }
     return Math.abs(hash) + 1;
-}
+} // --- hashCode 終了 ---
 
 function safeGetItem(key) {
-    try { return localStorage.getItem(key); } catch (e) { return null; }
+    try {
+        return localStorage.getItem(key);
+    } catch (e) {
+        console.warn('Storage access blocked:', e);
+        return null;
+    }
 } 
+
 function safeSetItem(key, val) {
-    try { localStorage.setItem(key, val); } catch (e) { }
+    try {
+        localStorage.setItem(key, val);
+    } catch (e) {
+        console.warn('Storage saving blocked:', e);
+    }
 } 
 
 const canvas = document.getElementById('gameCanvas');
@@ -176,6 +194,7 @@ const nameEl = document.getElementById('nameInput');
 const passEl = document.getElementById('passInput');
 const uiLayer = document.getElementById('ui-layer');
 const infoPanel = document.getElementById('info-panel');
+const signalMsgEl = document.getElementById('signal-message');
 const controlsHelpEl = document.getElementById('controls-help');
 
 const gateScreen = document.getElementById('gate-screen');
@@ -192,7 +211,7 @@ let savedBright = safeGetItem('goblinsNest_bright');
 let brightnessLevel = savedBright !== null ? parseFloat(savedBright) : 0.5;
 
 let savedFF = safeGetItem('goblinsNest_isFF');
-let isFriendlyFire = savedFF === 'true'; 
+let isFriendlyFire = savedFF === 'true'; // デフォルトはfalse
 
 if (canvas) {
     const bVal = 0.6 + (brightnessLevel * 0.8);
@@ -217,13 +236,14 @@ let isDraggingBGM = false;
 let isDraggingSE = false;
 let isDraggingBright = false; 
 
-const PEER_ID_PREFIX = 'gn_beta3_'; 
+const PEER_ID_PREFIX = 'gn_beta2_'; 
 let peer = null;
 let conn = null;
 let isMatching = false; 
 let isConnected = false; 
 let isHost = false; 
 
+// 入力消失修正: 単一ステートではなくキュー管理に変更
 let guestInputQueue = []; 
 
 let lastSyncTime = 0;
@@ -265,11 +285,14 @@ const RAGE_COOLDOWN = 180;
 const GOBLIN_LOOK_INTERVAL = 300;
 const GOBLIN_UPDATE_INTERVAL = 80;
 const MINIMAP_UPDATE_INTERVAL = 200;
+const ATTACK_SHAKE = 2;
 const HIT_SHAKE_DURATION = 120;
+const HIT_SHAKE_POWER = 3;
 const ATTACK_SCALE_START = 1.3;
 const IFRAME_DURATION = 500;
 const SMELL_RADIUS = 3;
 const SIGHT_RADIUS = 7;
+const DAUGHTER_OFFSET_Y = 0.3;
 const ATTACK_COOLDOWN = 0.1;
 
 const STATE = { IDLE: 'idle', ALERT: 'alert', LOCK: 'lock', RAGE: 'rage', CHARGE: 'charge', REAPPEAR: 'reappear', DYING: 'dying' };
@@ -281,9 +304,9 @@ const visionHoleCanvas = document.createElement('canvas');
 visionHoleCanvas.width = visionSize; visionHoleCanvas.height = visionSize;
 const vhCtx = visionHoleCanvas.getContext('2d');
 const vhGrad = vhCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
-vhGrad.addColorStop(0, "rgba(0,0,0,1)");                 
+vhGrad.addColorStop(0, "rgba(0,0,0,1)");              
 vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");        
-vhGrad.addColorStop(1, "rgba(0,0,0,0)");                 
+vhGrad.addColorStop(1, "rgba(0,0,0,0)");              
 vhCtx.fillStyle = vhGrad;
 vhCtx.beginPath(); vhCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); vhCtx.fill();
 
@@ -333,8 +356,8 @@ let debugCurrentNormalIdx = -1;
 let debugCurrentRageIdx = -1;
 
 let currentAudio = null;
+let fadeInterval = null; 
 let currentMusicState = 'normal';
-let currentFadeVolume = 1.0; 
 
 const floorTileImg = new Image(); floorTileImg.src = 'assets/floor/floor_tile.png';
 const goblinImages = { front: new Image(), back: new Image(), side: new Image() };
@@ -398,17 +421,21 @@ let minimapFloorCtx = minimapFloorCanvas.getContext('2d');
 let minimapFloorDrawn = false;
 let lastMinimapUpdate = 0;
 
-// 投票システムの状態
-let voteState = { p1: null, p2: null };
-let agreedAction = null; 
+let signalState = { 
+    active: false, 
+    type: null, 
+    p1: false,  
+    p2: false,  
+    startTime: 0,
+    agreedTime: 0 
+};
 
 if (safeGetItem('goblinsNest_gatePassed')) {
     gateScreen.style.display = 'none';
     gameState = 'title';
 }
 
-gatePassInput.addEventListener('input', (e) => {
-    if (e.isComposing) return;
+gatePassInput.addEventListener('input', () => {
     gatePassInput.value = gatePassInput.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
 });
 
@@ -419,7 +446,6 @@ function attemptGatePass() {
         gameState = 'title';
         safeSetItem('goblinsNest_gatePassed', 'true');
         isInputLocked = true;
-        updateInputPosition(); 
         setTimeout(() => { isInputLocked = false; }, 500);
     } else {
         gatePassInput.value = '';
@@ -429,6 +455,7 @@ function attemptGatePass() {
 } 
 
 gateBtn.addEventListener('click', attemptGatePass);
+
 gatePassInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) {
         attemptGatePass();
@@ -457,13 +484,7 @@ function update() {
     if(titleBGM) titleBGM.volume = realBGMVol;
     if(clearBGM) clearBGM.volume = realBGMVol;
     
-    if(currentAudio) {
-        if (currentFadeVolume < 1.0) {
-            currentFadeVolume += 0.015; 
-            if (currentFadeVolume > 1.0) currentFadeVolume = 1.0;
-        }
-        currentAudio.volume = (currentMusicState==='rage' ? 0.5 : 0.4) * realBGMVol * 2.5 * currentFadeVolume;
-    }
+    if(currentAudio && !fadeInterval) currentAudio.volume = (currentMusicState==='rage' ? 0.5 : 0.4) * realBGMVol * 2.5;
     
     if(greyBGM) {
         let greyVolFactor = 0.0;
@@ -487,7 +508,17 @@ function update() {
         greyBGM.volume = 0.4 * realBGMVol * 2.5 * greyVolFactor;
     }
 
+    if (!isGameOver && !gameCleared && signalState.active && !signalState.agreedTime && performance.now() - signalState.startTime > 3000) {
+        signalState.active = false;
+        signalState.p1 = false;
+        signalState.p2 = false;
+        signalMsgEl.style.opacity = 0;
+    }
+
+    updateInputPosition(); 
+    
     if (gameState === 'game') {
+        // 同期による娘発見フラグの監視とBGM遷移
         if (!foundDaughterNotified && daughter.rescued) {
              foundDaughter = true;
              foundDaughterNotified = true;
@@ -496,7 +527,7 @@ function update() {
              updateInfoText();
         }
 
-        if ((isHost || isDebugMode) && !isDebugMode && (hpP1 <= 0 || hpP2 <= 0) && !isGameOver) {
+        if (!isDebugMode && (hpP1 <= 0 || hpP2 <= 0) && !isGameOver) {
             isGameOver = true;
             timerStopped = true;
             showResult();
@@ -504,6 +535,8 @@ function update() {
 
         if (!isDebugMode) { 
             if (isHost) {
+                // ホスト側：入力キューの消化
+                // 1フレームあたり最大5件処理して、詰まりを解消しつつテレポートを防ぐ
                 let processed = 0;
                 while (guestInputQueue.length > 0 && processed < 5) {
                     const input = guestInputQueue.shift();
@@ -511,25 +544,22 @@ function update() {
                         movePlayer(player2, input.dx, input.dy);
                     } else if (input.type === 'ATTACK') {
                         playerAttack(player2);
-                    } else if (input.type === 'VOTE') {
-                        if (input.kind === 'RESTART') {
-                            voteState.p2 = (voteState.p2 === 'restart') ? null : 'restart';
-                        } else if (input.kind === 'RETURN') {
-                            voteState.p2 = (voteState.p2 === 'return') ? null : 'return';
-                        }
-                        playClickSound(); 
                     }
                     processed++;
                 }
 
-                if (!agreedAction) {
-                    if (voteState.p1 === 'restart' && voteState.p2 === 'restart') {
-                        agreedAction = 'restart';
-                        setTimeout(() => startDungeonGame(false), 500); 
-                    } else if (voteState.p1 === 'return' && voteState.p2 === 'return') {
-                        agreedAction = 'return';
-                        if (conn && conn.open) conn.send({ type: 'GO_TITLE' });
-                        setTimeout(() => location.reload(), 500);
+                if (signalState.active && signalState.p1 && signalState.p2) {
+                    if (!signalState.agreedTime) {
+                        signalState.agreedTime = performance.now(); 
+                    } else {
+                        if (performance.now() - signalState.agreedTime > 2000) {
+                            if (signalState.type === 'R') {
+                                startDungeonGame(false); 
+                            } else if (signalState.type === 'W') {
+                                if (conn && conn.open) conn.send({ type: 'GO_TITLE' });
+                                location.reload();
+                            }
+                        }
                     }
                 }
 
@@ -551,23 +581,17 @@ function update() {
                                 dt: g.deathTime, da: g.deathAngle, dp: g.dissolveProgress,
                                 ic: g.isCasting
                             })),
-                            vote: voteState, 
+                            sig: signalState, 
                             t: (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime,
                             cl: gameCleared,
                             go: isGameOver,
                             gm: isGreyMode,
                             hn: nameEl.value,
-                            ff: isFriendlyFire 
+                            ff: isFriendlyFire // FF設定を同期
                         };
                         conn.send(state);
                         lastSyncTime = now;
                     }
-                }
-            } else {
-                const now = performance.now();
-                 if (now - lastMinimapUpdate > MINIMAP_UPDATE_INTERVAL) {
-                    updateMinimap();
-                    lastMinimapUpdate = now;
                 }
             }
         } else {
@@ -577,7 +601,7 @@ function update() {
 
     draw(); 
     requestAnimationFrame(update);
-} 
+} // --- update 終了 ---
 
 function updateInputPosition() {
     const rect = canvas.getBoundingClientRect();
@@ -622,32 +646,24 @@ function updateInputPosition() {
         }
     } else if (gameState === 'game') {
         if (isDebugMode) {
-             controlsHelpEl.innerText = "【P1】移動:矢印 攻撃:Z 【P2】移動:WASD 攻撃:X | [DEBUG MODE]";
+             controlsHelpEl.innerText = "【P1】移動:矢印 攻撃:Z 【P2】移動:WASD 攻撃:X | R:リスタート | [DEBUG MODE]";
         } else {
              if (isHost) {
-                 controlsHelpEl.innerText = "【P1(あなた)】移動:矢印 攻撃:Z | 【P2(相棒)】操作待受中";
+                 controlsHelpEl.innerText = "【P1(あなた)】移動:矢印 攻撃:Z | 【P2(相棒)】操作待受中 | R:合図";
              } else {
-                 controlsHelpEl.innerText = "【P2(あなた)】移動:矢印 攻撃:Z | 【P1(相棒)】操作待受中";
+                 controlsHelpEl.innerText = "【P2(あなた)】移動:矢印 攻撃:Z | 【P1(相棒)】操作待受中 | R:合図";
              }
         }
     }
 } 
-
-window.addEventListener('resize', updateInputPosition);
 
 function draw() {
     ctx.clearRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
     if (gameState === 'game') {
         drawGameScreen();
     } else {
-        // 画像読み込みエラー対策：とりあえず背景を塗る
-        ctx.fillStyle = "#222"; 
-        ctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
-        
-        if (titleBgImg.complete && titleBgImg.naturalWidth !== 0) {
-            ctx.drawImage(titleBgImg, 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
-        }
-
+        if (titleBgImg.complete) ctx.drawImage(titleBgImg, 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        else { ctx.fillStyle="#222"; ctx.fillRect(0,0,VIRTUAL_WIDTH,VIRTUAL_HEIGHT); }
         if (gameState === 'title') drawTitleScreen();
         else if (gameState === 'matching') drawMatchingScreen();
     }
@@ -663,6 +679,7 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
     ctx.textAlign = "right";
     ctx.textBaseline = "middle"; 
     const textX = UI_X - 10;
+    // 修正: 物理補正 -4px を適用
     const textY = y + BAR_H/2 - 4; 
     ctx.fillText(label, textX, textY);
 
@@ -671,6 +688,7 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
         ctx.strokeStyle = "red";
         ctx.lineWidth = 2;
         ctx.beginPath();
+        // 修正: 斜線位置も補正後の座標に合わせる
         ctx.moveTo(textX - textWidth, textY + 6);
         ctx.lineTo(textX + 2, textY - 6);
         ctx.stroke();
@@ -694,7 +712,7 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
     ctx.closePath();
     ctx.fillStyle = color; 
     ctx.fill();
-} 
+} // --- drawTriangleVolumeBar 終了 ---
 
 function drawTitleScreen() {
     ctx.textAlign = "center";
@@ -757,10 +775,12 @@ function drawMatchingScreen() {
         ctx.fillStyle = "white";
         ctx.font = "30px 'DotGothic16'"; ctx.fillText("待機", VIRTUAL_WIDTH / 2, BTN_CENTER_Y + TEXT_OFFSET_Y);
         
+        // 予演ボタン
         ctx.lineWidth = 2;
         ctx.strokeRect(VIRTUAL_WIDTH - 150, VIRTUAL_HEIGHT - 80, 100, 40);
         ctx.font = "20px 'DotGothic16'"; ctx.fillText("予演", VIRTUAL_WIDTH - 100, DEBUG_BTN_CENTER_Y + TEXT_OFFSET_Y); 
         
+        // FF設定ボタン（左下）
         ctx.lineWidth = 2;
         ctx.strokeRect(50, VIRTUAL_HEIGHT - 80, 140, 40);
         if (isFriendlyFire) {
@@ -834,6 +854,13 @@ function saveSessionData(prefix) {
     safeSetItem(sKeyCount, playCount);
 } 
 
+function shuffleArrayVisual(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
 function stopCurrentBgm() {
     if (currentAudio) { 
         currentAudio.pause();
@@ -862,8 +889,9 @@ function playAndFadeIn(srcOrAudio, targetVolRatio, fadeDuration = 600) {
     }
     audio.loop = true; 
     
-    currentFadeVolume = 0.0;
-    audio.volume = 0;
+    const realBGMVol = isMutedBGM ? 0 : bgmVolume;
+    const targetVolume = targetVolRatio * realBGMVol * 2.5; 
+    audio.volume = targetVolume;
     
     audio.play().catch((e) => { 
         console.log("BGM Play Error:", e); 
@@ -903,11 +931,11 @@ function playSE(audioArrayOrSingle, volumeRatio = 0.6, pitchRand = 0.1, basePitc
     if (isGreyMode) return; 
     if (isMutedSE) return;
 
-    const audio = Array.isArray(audioArrayOrSingle) ? audioArrayOrSingle[Math.floor(Math.random() * audioArrayOrSingle.length)] : audioArrayOrSingle;
+    const audio = Array.isArray(audioArrayOrSingle) ? audioArrayOrSingle[Math.floor(rnd.nextFloat() * audioArrayOrSingle.length)] : audioArrayOrSingle;
     const clone = audio.cloneNode();
     clone.currentTime = 0;
     clone.volume = Math.min(1, volumeRatio * seVolume * 2); 
-    clone.playbackRate = basePitch + (Math.random() - 0.5) * pitchRand;
+    clone.playbackRate = basePitch + (rnd.nextFloat() - 0.5) * pitchRand;
     clone.play().catch(() => {});
 }
 
@@ -933,7 +961,44 @@ function playElectronicBlip() {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} 
+} // --- playElectronicBlip 終了 ---
+
+function playSignalSound(type) {
+    if (isMutedSE) return;
+    const actx = getSharedAudioContext(); 
+    if (!actx) return;
+    
+    try {
+        const osc = actx.createOscillator();
+        const gain = actx.createGain();
+        osc.connect(gain);
+        gain.connect(actx.destination);
+        const now = actx.currentTime;
+        const vol = seVolume * 0.4;
+        let duration = 0;
+        
+        if (type === 'R') { 
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1500, now);
+            osc.frequency.linearRampToValueAtTime(1400, now + 0.6);
+            gain.gain.setValueAtTime(vol * 0.3, now); 
+            gain.gain.linearRampToValueAtTime(0, now + 0.6);
+            duration = 0.6;
+        } else if (type === 'W') { 
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(150, now);
+            osc.frequency.linearRampToValueAtTime(100, now + 1.5);
+            gain.gain.setValueAtTime(vol * 0.8, now);
+            gain.gain.linearRampToValueAtTime(0, now + 1.5);
+            duration = 1.5;
+        }
+        
+        osc.start(now);
+        osc.stop(now + duration);
+    } catch(e) {
+        console.warn("AudioContext limit reached");
+    }
+} // --- playSignalSound 終了 ---
 
 function playClickSound() {
     if (isMutedSE) return;
@@ -957,7 +1022,7 @@ function playClickSound() {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} 
+} // --- playClickSound 終了 ---
 
 function playChurchBell() {
     if (isMutedSE) return;
@@ -988,7 +1053,7 @@ function playChurchBell() {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} 
+} // --- playChurchBell 終了 ---
 
 function calculateShortestPath() {
     let startNode = {x: startLeftX, y: startBottomY};
@@ -1018,7 +1083,7 @@ function calculateShortestPath() {
 
 function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     isDebugMode = debugFlag; 
-    guestInputQueue = []; 
+    guestInputQueue = []; // ゲーム開始時にキューをクリア
 
     const prefix = isDebugMode ? S_KEY_PREFIX_DEBUG : S_KEY_PREFIX_REAL;
     
@@ -1033,10 +1098,6 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
         selectedNormalIdx = hostOverrideData.normalIdx;
         selectedRageIdx = hostOverrideData.rageIdx;
         playCount = hostOverrideData.playCount; 
-
-        if (hostOverrideData.ff !== undefined) {
-             isFriendlyFire = hostOverrideData.ff;
-        }
         
     } else {
         initDecks(prefix);
@@ -1079,8 +1140,6 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     uiLayer.style.display = 'block';
     nameEl.style.display = 'none'; passEl.style.display = 'none';
     
-    updateInputPosition();
-    
     if (isDebugMode) {
         infoPanel.style.display = 'block';
         currentBgmDebugName = ""; 
@@ -1088,8 +1147,8 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
         infoPanel.style.display = 'none';
     }
     
-    voteState = { p1: null, p2: null }; 
-    agreedAction = null;
+    signalState = { active: false, type: null, startTime: 0, p1: false, p2: false, agreedTime: 0 };
+    signalMsgEl.style.opacity = 0;
 
     if (!isDebugMode && isHost && conn && conn.open) {
         conn.send({ 
@@ -1098,8 +1157,7 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
             colorIdx: selectedColorIdx, 
             normalIdx: selectedNormalIdx, 
             rageIdx: selectedRageIdx,
-            playCount: playCount,
-            ff: isFriendlyFire 
+            playCount: playCount 
         });
     }
 
@@ -1183,7 +1241,7 @@ function getNextStepBFS(startX, startY, targetX, targetY) {
         if (curr.x === targetX && curr.y === targetY) { found = true; break; }
         
         let dirs = [...DIRS];
-        shuffleArray(dirs, rnd); 
+        shuffleArray(dirs, rnd); // シャッフル修正
         
         for (let [dx, dy] of dirs) {
             let nx = curr.x + dx, ny = curr.y + dy;
@@ -1306,7 +1364,7 @@ function generateDungeon() {
         const branch = branches[i]; branches.splice(i, 1);
         
         let possibleDirs = [0,1,2,3].filter(d => d !== (branch.parentDir + 2) % 4);
-        shuffleArray(possibleDirs, rnd); 
+        shuffleArray(possibleDirs, rnd); // Fisher-Yates shuffle
         
         let added = 0;
         for (const dir of possibleDirs) {
@@ -1344,6 +1402,7 @@ function generateDungeon() {
     daughter.rescued = false; daughter.rescuer = null;
     hpP1 = 10; hpP2 = 10;
     document.getElementById('result-rank').style.display = 'none';
+    document.getElementById('restart-hint').innerText = ""; 
     
     updateInfoText();
     playNormalBgm();
@@ -1371,7 +1430,7 @@ function carveCorridor(startX, startY, dirIdx, length, width) {
 }
 
 function placeDaughter() {
-    const sortedRooms = [...rooms].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    const sortedRooms = [...rooms].sort((a, b) => a.y - b.y);
     let targetRoom = sortedRooms.length >= 3 ? sortedRooms[Math.floor(rnd.nextFloat() * 2)] : sortedRooms[0]; 
     let candidates = [];
     for (let dy = 0; dy < targetRoom.h; dy++) for (let dx = 0; dx < targetRoom.w; dx++) {
@@ -1457,7 +1516,7 @@ function updateGoblin(g, now) {
     if (g.state === STATE.DYING) {
         const elapsed = now - g.deathTime;
         const FADE_START_DELAY = 1500; 
-        const FADE_DURATION = 1000;            
+        const FADE_DURATION = 1000;        
 
         if (elapsed < 500) {
             g.deathAngle = (elapsed / 500) * (Math.PI / 2) * g.deathDir;
@@ -1511,7 +1570,7 @@ function updateGoblin(g, now) {
         setGoblinState(g, STATE.ALERT, now); g.targetPlayer = sensedPlayer;
     } else if (g.state === STATE.IDLE && canMove) { 
         const dirs = DIRS.map((d, i) => ({d, i}));
-        shuffleArray(dirs, rnd); 
+        shuffleArray(dirs, rnd); // シャッフル修正
         for (const {d: [dx, dy], i} of dirs) {
             const nx = g.x + dx, ny = g.y + dy;
             if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && grid[ny][nx] === 1 && !isBlockedForGoblin(nx, ny)) {
@@ -1765,7 +1824,7 @@ function updateGrey(g, now) {
         
         if (!moved) {
             const dirs = DIRS.map((d, i) => ({d, i}));
-            shuffleArray(dirs, rnd); 
+            shuffleArray(dirs, rnd); // シャッフル修正
             for (const {d: [dx, dy], i} of dirs) {
                 const nx = g.x + dx, ny = g.y + dy;
                 if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && grid[ny][nx] === 1 && !isBlockedForGoblin(nx, ny)) {
@@ -1913,7 +1972,6 @@ function movePlayer(p, dx, dy) {
             healingBiscuit.active = false;
             if (p === player1) hpP1 = 10; else hpP2 = 10;
             playElectronicBlip();
-            if (isHost && conn && conn.open) { conn.send({type: 'SE', name: 'blip'}); }
         }
 
         if (!foundDaughter && nx === daughter.x && ny === daughter.y) {
@@ -1961,15 +2019,18 @@ function playerAttack(p) {
         }
     });
     const other = p === player1 ? player2 : player1;
+    // FF設定がONの場合のみ味方にダメージ
     if (isFriendlyFire && (p===player1?hpP2>0:hpP1>0) && other.x === tx && other.y === ty) { 
         damagePlayer(other, 3); hit = true; 
     }
 
+    // 攻撃音再生 (ヒット時か素振りか)
+    // FF=OFFで味方を殴った場合はヒット音を鳴らさない(素振り音)
     const hitAnything = hit; 
     playSE(p===player1 ? SE.playerAttack1 : SE.playerAttack2, hitAnything?0.8:0.5, 0.05);
     
-    const ex = tx + 0.5 + (Math.random()-0.5)*0.2;
-    const ey = ty + 0.5 + (Math.random()-0.5)*0.2;
+    const ex = tx + 0.5 + (rnd.nextFloat()-0.5)*0.2;
+    const ey = ty + 0.5 + (rnd.nextFloat()-0.5)*0.2;
     
     if (isHost && conn && conn.open) {
         conn.send({
@@ -1985,8 +2046,6 @@ function playerAttack(p) {
 } 
 
 function checkClear() {
-    if (!isHost && !isDebugMode) return;
-
     const isP1Home = player1.y === startBottomY && (player1.x === startLeftX || player1.x === startRightX);
     const isP2Home = player2.y === startBottomY && (player2.x === startLeftX || player2.x === startRightX);
     
@@ -2004,6 +2063,17 @@ function checkClear() {
 function showResult() {
     const rankEl = document.getElementById('result-rank');
     rankEl.style.display = 'block';
+    
+    const restartHint = document.getElementById('restart-hint');
+    if (isDebugMode) {
+         restartHint.innerHTML = "(R: 次のダンジョン)";
+    } else {
+        if (gameCleared) {
+            restartHint.innerHTML = "(R: 続行 / W: 帰還)";
+        } else {
+            restartHint.innerHTML = "(R: 再起 / W: 撤退)";
+        }
+    }
 
     if ((hpP1 <= 0 || hpP2 <= 0) && !gameCleared) {
         document.getElementById('rank-grade').innerText = isGreyMode ? "Abducted" : "Game Over";
@@ -2170,7 +2240,7 @@ function drawGameScreen() {
     [player1, player2].forEach(p => {
         const isP2 = p === player2;
         const isDead = (hpP1 <= 0 || hpP2 <= 0) || isGameOver; 
-        const shake = (now - p.hitShakeTime < HIT_SHAKE_DURATION) ? (Math.random()*6-3) : 0; 
+        const shake = (now - p.hitShakeTime < HIT_SHAKE_DURATION) ? (rnd.nextFloat()*6-3) : 0; 
         
         let img = playerImages.front;
         let sx = 1;
@@ -2295,78 +2365,307 @@ function drawGameScreen() {
     }
     drawHeartsUI();
     
-    if (isGameOver || gameCleared) {
-        const myVote = (isHost || isDebugMode) ? voteState.p1 : voteState.p2;
-        const otherVote = (isHost || isDebugMode) ? voteState.p2 : voteState.p1;
-        const isBlink = Math.floor(Date.now() / 400) % 2 === 0;
-
-        const drawVoteBtn = (x, y, type, labelDefault) => {
-            const w = 160, h = 60;
-            const isMyVote = myVote === type;
-            const isOtherVote = otherVote === type;
-            const isAgreed = isMyVote && isOtherVote;
-
-            let text = labelDefault;
-            let style = "normal"; 
-
-            if (isAgreed) {
-                text = "合意";
-                style = "agreed";
-            } else if (isMyVote) {
-                text = "提案";
-                style = "pending";
-            } else if (isOtherVote) {
-                text = "要請";
-                style = "request";
+    const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
+    
+    if (signalState.active) {
+        let msg = "";
+        
+        if (gameCleared) {
+            if (signalState.type === 'R') msg = "続行の合図だ！(R)";
+            else if (signalState.type === 'W') msg = "帰還の合図だ！(W)";
+        } else if (effectiveGameOver) {
+            if (signalState.type === 'R') msg = "再起の合図だ！(R)";
+            else if (signalState.type === 'W') msg = "帰還の合図だ！(W)";
+        } else {
+            if (signalState.type === 'R') msg = "撤退の合図だ！(R)";
+        }
+        
+        if (msg) {
+            signalMsgEl.innerText = msg;
+            signalMsgEl.style.opacity = 1;
+            
+            if (signalState.p1 || signalState.p2) {
+                 signalMsgEl.style.borderColor = "#0ff";
             }
 
-            ctx.save();
-            ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            ctx.font = "30px 'DotGothic16'";
-            
-            if (style === "agreed") {
-                ctx.fillStyle = "#ff0000"; 
-                ctx.fillRect(x - w/2, y - h/2, w, h);
-                ctx.strokeStyle = "#ffaaaa"; ctx.lineWidth = 4;
-                ctx.strokeRect(x - w/2, y - h/2, w, h);
-                ctx.fillStyle = "white";
-            } else if (style === "pending") {
-                if (isBlink) {
-                    ctx.strokeStyle = "#ffff00"; ctx.lineWidth = 4;
-                    ctx.strokeRect(x - w/2, y - h/2, w, h);
-                    ctx.fillStyle = "#ffff00";
-                } else {
-                    ctx.strokeStyle = "#555"; ctx.lineWidth = 4;
-                    ctx.strokeRect(x - w/2, y - h/2, w, h);
-                    ctx.fillStyle = "#888";
-                }
-            } else if (style === "request") {
-                if (isBlink) {
-                    ctx.strokeStyle = "#00ffff"; ctx.lineWidth = 4;
-                    ctx.strokeRect(x - w/2, y - h/2, w, h);
-                    ctx.fillStyle = "#00ffff";
-                } else {
-                    ctx.strokeStyle = "#555"; ctx.lineWidth = 4;
-                    ctx.strokeRect(x - w/2, y - h/2, w, h);
-                    ctx.fillStyle = "#888";
-                }
+            if (signalState.agreedTime) {
+                signalMsgEl.style.color = "#ff0000";
+                signalMsgEl.style.borderColor = "#ff0000";
             } else {
-                ctx.strokeStyle = "white"; ctx.lineWidth = 2;
-                ctx.strokeRect(x - w/2, y - h/2, w, h);
-                ctx.fillStyle = "white";
+                signalMsgEl.style.color = "#ff0";
+                signalMsgEl.style.borderColor = "rgba(255,255,255,0.5)";
             }
             
-            ctx.fillText(text, x, y - 4);
-            ctx.restore();
-        };
-
-        const RESTART_X = 200, RESTART_Y = VIRTUAL_HEIGHT - 60;
-        const RETURN_X = VIRTUAL_WIDTH - 200, RETURN_Y = VIRTUAL_HEIGHT - 60;
-
-        const leftLabel = gameCleared ? "続行" : "再起";
-        drawVoteBtn(RESTART_X, RESTART_Y, 'restart', leftLabel);
-        drawVoteBtn(RETURN_X, RETURN_Y, 'return', "帰還");
+            if ((effectiveGameOver || gameCleared) && !signalState.agreedTime) {
+                if ((isHost && signalState.p1) || (!isHost && signalState.p2)) {
+                    signalMsgEl.innerText += "\n(待機中...)";
+                } else if ((isHost && signalState.p2) || (!isHost && signalState.p1)) {
+                    signalMsgEl.innerText += "\n(相手の提案)";
+                }
+            }
+        } else {
+            signalMsgEl.style.opacity = 0;
+        }
+    } else {
+        signalMsgEl.style.opacity = 0;
     }
+} 
+
+function drawAnalogClock() {
+    const CX = VIRTUAL_WIDTH - 60; 
+    const CY = 176; 
+    const R = 34;    
+
+    const t = (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime;
+    const sBase = shortestPathSteps * 1.1; 
+    const maxTime = (sBase * 2.8) + 1.0; 
+
+    const startAngle = -Math.PI / 2;
+    const totalRad = Math.PI * 2;
+
+    const sRatio = 20 / 61;
+    const aRatio = 40 / 61;
+    const bRatio = 60 / 61;
+    
+    const angleS = startAngle + totalRad * sRatio;
+    const angleA = startAngle + totalRad * aRatio;
+    const angleB = startAngle + totalRad * bRatio;
+    const angleMax = startAngle + totalRad;
+
+    ctx.save();
+    ctx.translate(CX, CY);
+    
+    let gradS = ctx.createRadialGradient(0, 0, R*0.2, 0, 0, R);
+    gradS.addColorStop(0, "#FFFACD"); gradS.addColorStop(0.5, "#FFD700"); gradS.addColorStop(1, "#DAA520");
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, R, startAngle, angleS); ctx.fillStyle = gradS; ctx.fill();
+
+    let gradA = ctx.createRadialGradient(0, 0, R*0.2, 0, 0, R);
+    gradA.addColorStop(0, "#FFFFFF"); gradA.addColorStop(0.5, "#C0C0C0"); gradA.addColorStop(1, "#A9A9A9");
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, R, angleS, angleA); ctx.fillStyle = gradA; ctx.fill();
+
+    let gradB = ctx.createRadialGradient(0, 0, R*0.2, 0, 0, R);
+    gradB.addColorStop(0, "#FFDAB9"); gradB.addColorStop(0.5, "#CD7F32"); gradB.addColorStop(1, "#8B4513");
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, R, angleA, angleB); ctx.fillStyle = gradB; ctx.fill();
+
+    let gradC = ctx.createRadialGradient(0, 0, R*0.2, 0, 0, R);
+    gradC.addColorStop(0, "#555555"); gradC.addColorStop(1, "#000000");
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, R, angleB, angleMax); ctx.fillStyle = gradC; ctx.fill();
+
+    let gradFrame = ctx.createLinearGradient(-R, -R, R, R);
+    gradFrame.addColorStop(0, "#E5E4E2"); gradFrame.addColorStop(0.5, "#A0A0A0"); gradFrame.addColorStop(1, "#F0F0F0");
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI*2);
+    ctx.strokeStyle = gradFrame; ctx.lineWidth = 4; ctx.stroke();
+
+    let currentRad;
+    if (t >= maxTime) {
+        const shake = (rnd.nextFloat() - 0.5) * 0.2; 
+        currentRad = angleMax + shake;
+    } else {
+        currentRad = startAngle + (t / maxTime) * totalRad;
+    }
+
+    const tipX = Math.cos(currentRad) * (R - 4);
+    const tipY = Math.sin(currentRad) * (R - 4);
+    const tailX = Math.cos(currentRad + Math.PI) * 8; 
+    const tailY = Math.sin(currentRad + Math.PI) * 8; 
+    
+    let gradNeedle = ctx.createLinearGradient(tailX, tailY, tipX, tipY);
+    gradNeedle.addColorStop(0, "#E5E4E2"); gradNeedle.addColorStop(1, "#FFFFFF");
+
+    ctx.beginPath(); ctx.moveTo(tailX, tailY); ctx.lineTo(tipX, tipY);
+    ctx.strokeStyle = gradNeedle; ctx.lineWidth = 3; ctx.stroke();
+    
+    ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, Math.PI*2);
+    ctx.fillStyle = gradFrame; ctx.fill();
+
+    ctx.restore();
+} 
+
+function drawHeartsUI() {
+    const heartSize = 30;
+    const startX = 56; 
+    const startY = 20;    
+    const spacingX = 35;  
+    const spacingY = 35;  
+    
+    ctx.save();
+    ctx.font = `${heartSize}px 'DotGothic16'`;
+    ctx.textBaseline = "top";
+    
+    let targetHp = hpP1;
+    if (!isDebugMode && !isHost) {
+        targetHp = hpP2;
+    }
+    
+    for (let i = 0; i < 10; i++) {
+        const row = Math.floor(i / 5); 
+        const col = i % 5;                
+        const x = startX + col * spacingX;
+        const y = startY + row * spacingY;
+        
+        if (isGreyMode) {
+            ctx.strokeStyle = "#002211"; 
+            ctx.lineWidth = 4;
+            if (i < targetHp) {
+                ctx.fillStyle = "#00ffaa"; 
+            } else {
+                ctx.fillStyle = "#113322";
+            }
+        } else {
+            ctx.strokeStyle = "#000000"; 
+            ctx.lineWidth = 4;
+            if (i < targetHp) {
+                ctx.fillStyle = "#ff0000";
+            } else {
+                ctx.fillStyle = "#333333";
+            }
+        }
+        ctx.strokeText("♥", x, y);
+        ctx.fillText("♥", x, y);
+    }
+    ctx.restore();
+} 
+
+function renderFloorCanvas() {
+    floorCanvas.width = GRID_W * SCALED_TILE; floorCanvas.height = GRID_H * SCALED_TILE;
+    floorCtx.fillStyle = "#000"; floorCtx.fillRect(0,0,floorCanvas.width, floorCanvas.height);
+    
+    for(let y=0; y<GRID_H; y++) {
+        for(let x=0; x<GRID_W; x++) {
+            let isFloor = grid[y][x] === 1;
+            let isAdj = false;
+            if (!isFloor) {
+                for(let dy=-1; dy<=1; dy++) {
+                    for(let dx=-1; dx<=1; dx++) {
+                        if(grid[y+dy] && grid[y+dy][x+dx] === 1) isAdj = true;
+                    }
+                }
+            }
+            
+            if (isFloor || isAdj) {
+                const v = floorVariant[y][x];
+                let rot=0, fx=1, fy=1;
+                if(v===1) rot=Math.PI/2; if(v===2) rot=Math.PI; if(v===3) rot=Math.PI*1.5;
+                if(v===4) fx=-1; if(v===5) fy=-1;
+                
+                floorCtx.save();
+                floorCtx.translate(x*SCALED_TILE+SCALED_TILE/2, y*SCALED_TILE+SCALED_TILE/2);
+                floorCtx.rotate(rot); floorCtx.scale(fx, fy);
+                
+                const targetImg = isGreyMode && greySpaceFloorImg.complete ? greySpaceFloorImg : floorTileImg;
+                if(targetImg.complete) floorCtx.drawImage(targetImg, -SCALED_TILE/2, -SCALED_TILE/2, SCALED_TILE, SCALED_TILE);
+                else { floorCtx.fillStyle="#555"; floorCtx.fillRect(-SCALED_TILE/2,-SCALED_TILE/2,SCALED_TILE,SCALED_TILE); }
+                
+                if (!isGreyMode) {
+                    floorCtx.globalCompositeOperation = 'source-atop';
+                    floorCtx.fillStyle = currentStageColor;
+                    floorCtx.globalAlpha = 0.6; 
+                    floorCtx.fillRect(-SCALED_TILE/2, -SCALED_TILE/2, SCALED_TILE, SCALED_TILE);
+                    floorCtx.globalAlpha = 1.0; 
+                }
+                floorCtx.restore();
+            }
+        }
+    }
+    
+    floorCtx.fillStyle = "#000";
+    const r = SCALED_TILE * 0.35;
+    
+    for(let y=0; y<GRID_H; y++) {
+        for(let x=0; x<GRID_W; x++) {
+            if (grid[y][x] === 0) {
+                const top = y > 0 && grid[y-1][x] === 1;
+                const bottom = y < GRID_H-1 && grid[y+1][x] === 1;
+                const left = x > 0 && grid[y][x-1] === 1;
+                const right = x < GRID_W-1 && grid[y][x+1] === 1;
+                
+                if (!top && !bottom && !left && !right) {
+                    floorCtx.fillRect(x*SCALED_TILE, y*SCALED_TILE, SCALED_TILE, SCALED_TILE);
+                    continue;
+                }
+
+                const tx = x * SCALED_TILE;
+                const ty = y * SCALED_TILE;
+                
+                floorCtx.beginPath();
+                if (top && left) { floorCtx.moveTo(tx, ty + r); floorCtx.arcTo(tx, ty, tx + r, ty, r); } 
+                else { floorCtx.moveTo(tx, ty); }
+                
+                if (top && right) { floorCtx.lineTo(tx + SCALED_TILE - r, ty); floorCtx.arcTo(tx + SCALED_TILE, ty, tx + SCALED_TILE, ty + r, r); } 
+                else { floorCtx.lineTo(tx + SCALED_TILE, ty); }
+                
+                if (bottom && right) { floorCtx.lineTo(tx + SCALED_TILE, ty + SCALED_TILE - r); floorCtx.arcTo(tx + SCALED_TILE, ty + SCALED_TILE, tx + SCALED_TILE - r, ty + SCALED_TILE, r); } 
+                else { floorCtx.lineTo(tx + SCALED_TILE, ty + SCALED_TILE); }
+                
+                if (bottom && left) { floorCtx.lineTo(tx + r, ty + SCALED_TILE); floorCtx.arcTo(tx, ty + SCALED_TILE, tx, ty + SCALED_TILE - r, r); } 
+                else { floorCtx.lineTo(tx, ty + SCALED_TILE); }
+                
+                floorCtx.closePath();
+                floorCtx.fill();
+            } 
+            else if (grid[y][x] === 1) {
+                const top = y > 0 && grid[y-1][x] === 1;
+                const bottom = y < GRID_H-1 && grid[y+1][x] === 1;
+                const left = x > 0 && grid[y][x-1] === 1;
+                const right = x < GRID_W-1 && grid[y][x+1] === 1;
+                
+                const tx = x * SCALED_TILE;
+                const ty = y * SCALED_TILE;
+                
+                if (!top && !left) {
+                    floorCtx.beginPath(); floorCtx.moveTo(tx, ty); floorCtx.lineTo(tx + r, ty);
+                    floorCtx.arc(tx + r, ty + r, r, Math.PI*1.5, Math.PI, true); floorCtx.fill();
+                }
+                if (!top && !right) {
+                    floorCtx.beginPath(); floorCtx.moveTo(tx + SCALED_TILE, ty); floorCtx.lineTo(tx + SCALED_TILE - r, ty);
+                    floorCtx.arc(tx + SCALED_TILE - r, ty + r, r, Math.PI*1.5, Math.PI*2); floorCtx.fill();
+                }
+                if (!bottom && !left) {
+                    floorCtx.beginPath(); floorCtx.moveTo(tx, ty + SCALED_TILE); floorCtx.lineTo(tx + r, ty + SCALED_TILE);
+                    floorCtx.arc(tx + r, ty + SCALED_TILE - r, r, Math.PI*0.5, Math.PI); floorCtx.fill();
+                }
+                if (!bottom && !right) {
+                    floorCtx.beginPath(); floorCtx.moveTo(tx + SCALED_TILE, ty + SCALED_TILE); floorCtx.lineTo(tx + SCALED_TILE - r, ty + SCALED_TILE);
+                    floorCtx.arc(tx + SCALED_TILE - r, ty + SCALED_TILE - r, r, Math.PI*0.5, 0, true); floorCtx.fill();
+                }
+            }
+        }
+    }
+    
+    const gradYStart = GRID_H * SCALED_TILE; 
+    const gradYEnd = (GRID_H - 3) * SCALED_TILE; 
+    
+    const grad = floorCtx.createLinearGradient(0, gradYStart, 0, gradYEnd);
+    grad.addColorStop(0, isGreyMode ? "rgba(0, 255, 100, 0.8)" : "rgba(255, 255, 200, 0.8)"); 
+    grad.addColorStop(1, isGreyMode ? "rgba(0, 255, 100, 0)" : "rgba(255, 255, 200, 0)");        
+    
+    floorCtx.fillStyle = grad;
+    floorCtx.fillRect(startLeftX*SCALED_TILE, gradYEnd, SCALED_TILE*2, SCALED_TILE*3);
+    
+    floorDrawn = true;
+} 
+
+function updateMinimap() {
+    const size = 180;
+    if (minimapCanvas.width !== size) minimapCanvas.width = minimapCanvas.height = size;
+    if (!minimapFloorDrawn) {
+        minimapFloorCanvas.width = minimapFloorCanvas.height = size;
+        const scale = size / Math.max(GRID_W, GRID_H);
+        minimapFloorCtx.fillStyle = "#444";
+        for(let y=0; y<GRID_H; y++) for(let x=0; x<GRID_W; x++) if(grid[y][x]===1) minimapFloorCtx.fillRect(x*scale, y*scale, 1, 1);
+        minimapFloorDrawn = true;
+    }
+    minimapCtx.fillStyle = "#111"; minimapCtx.fillRect(0,0,size,size);
+    minimapCtx.drawImage(minimapFloorCanvas, 0, 0);
+    const scale = size / Math.max(GRID_W, GRID_H);
+    
+    const drawDot = (x,y,c,s=3) => { minimapCtx.fillStyle=c; minimapCtx.fillRect(x*scale-s/2, y*scale-s/2, s, s); };
+    
+    drawDot(player1.x, player1.y, "#0ff", 5); 
+    drawDot(player2.x, player2.y, "#f90", 5); 
+    
+    if(!daughter.rescued) drawDot(daughter.x, daughter.y, "#ff0");
+    goblins.forEach(g => { if(g.hp>0) drawDot(g.x, g.y, g.state===STATE.RAGE?"#a0f":"#fa0"); });
 } 
 
 function handleDown(e) {
@@ -2410,7 +2709,6 @@ function handleDown(e) {
         if(pos.x > 300 && pos.x < 700 && pos.y > 200 && pos.y < 450) { 
             gameState='matching'; 
             titleBGM.play().catch(()=>{}); 
-            setTimeout(updateInputPosition, 0);
         }
     }
     else if (gameState === 'matching') {
@@ -2427,7 +2725,6 @@ function handleDown(e) {
                 nameEl.disabled = false;
                 passEl.disabled = false;
                 if (peer) { peer.destroy(); peer = null; }
-                updateInputPosition(); 
             } else {
                 if(nameEl.value && passEl.value) {
                     playClickSound(); 
@@ -2441,51 +2738,16 @@ function handleDown(e) {
             }
         }
         
+        // デバッグモードボタン (右下)
         if (!isMatching && !isConnected && pos.x > VIRTUAL_WIDTH - 150 && pos.x < VIRTUAL_WIDTH - 50 && pos.y > VIRTUAL_HEIGHT - 80) {
             startDungeonGame(true); 
         }
 
+        // FF設定ボタン (左下)
         if (!isMatching && !isConnected && pos.x > 50 && pos.x < 190 && pos.y > VIRTUAL_HEIGHT - 80) {
             isFriendlyFire = !isFriendlyFire;
             safeSetItem('goblinsNest_isFF', isFriendlyFire);
             playClickSound();
-        }
-    }
-    else if (gameState === 'game') {
-        if (!isDebugMode && (isGameOver || gameCleared) && !agreedAction) {
-            const RESTART_X = 200, RESTART_Y = VIRTUAL_HEIGHT - 60;
-            const RETURN_X = VIRTUAL_WIDTH - 200, RETURN_Y = VIRTUAL_HEIGHT - 60;
-            const w = 160, h = 60;
-
-            const isRestart = (pos.x > RESTART_X - w/2 && pos.x < RESTART_X + w/2 && pos.y > RESTART_Y - h/2 && pos.y < RESTART_Y + h/2);
-            const isReturn = (pos.x > RETURN_X - w/2 && pos.x < RETURN_X + w/2 && pos.y > RETURN_Y - h/2 && pos.y < RETURN_Y + h/2);
-
-            if (isHost) {
-                if (isRestart) {
-                    voteState.p1 = (voteState.p1 === 'restart') ? null : 'restart';
-                    playClickSound();
-                } else if (isReturn) {
-                    voteState.p1 = (voteState.p1 === 'return') ? null : 'return';
-                    playClickSound();
-                }
-            } else {
-                // Guest vote send
-                if (isRestart) {
-                    conn.send({ type: 'VOTE', kind: 'RESTART' });
-                    playClickSound();
-                } else if (isReturn) {
-                    conn.send({ type: 'VOTE', kind: 'RETURN' });
-                    playClickSound();
-                }
-            }
-        }
-        // Debug mode restart
-        else if (isDebugMode && (isGameOver || gameCleared)) {
-            const RESTART_X = 200, RESTART_Y = VIRTUAL_HEIGHT - 60;
-            const w = 160, h = 60;
-            if (pos.x > RESTART_X - w/2 && pos.x < RESTART_X + w/2 && pos.y > RESTART_Y - h/2 && pos.y < RESTART_Y + h/2) {
-                startDungeonGame(true);
-            }
         }
     }
 } 
@@ -2526,12 +2788,10 @@ window.addEventListener('mouseup', saveVolume);
 canvas.addEventListener('touchstart', (e) => { if(gameState!=='game') { e.preventDefault(); handleDown(e); } }, {passive:false});
 window.addEventListener('touchend', saveVolume);
 
-nameEl.addEventListener('input', (e) => {
-    if (e.isComposing) return;
+nameEl.addEventListener('input', () => {
     safeSetItem('goblinsNest_name', nameEl.value);
 });
-passEl.addEventListener('input', (e) => {
-    if (e.isComposing) return;
+passEl.addEventListener('input', () => {
     passEl.value = passEl.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)).replace(/[^a-zA-Z0-9]/g, '');
     safeSetItem('goblinsNest_pass', passEl.value);
 });
@@ -2543,6 +2803,53 @@ window.addEventListener('keydown', (e) => {
     keys[e.key] = true;
     if (gameState === 'game') {
         const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
+
+        if (e.key === 'r' || e.key === 'R') {
+            if (!isDebugMode) {
+                if (effectiveGameOver || gameCleared) {
+                    signalState.active = true;
+                    signalState.type = 'R';
+                    
+                    if (isHost) signalState.p1 = !signalState.p1;
+                    else signalState.p2 = !signalState.p2;
+                    
+                    if (conn && conn.open) conn.send({ type: 'SIGNAL', key: 'R' });
+                    playSignalSound('R');
+                } else if (!signalState.active) {
+                    signalState.active = true;
+                    signalState.type = 'R';
+                    signalState.startTime = performance.now();
+                    if (isHost) signalState.p1 = true;
+                    else signalState.p2 = true;
+                    if (conn && conn.open) conn.send({ type: 'SIGNAL', key: 'R' });
+                    playSignalSound('R');
+                }
+            } else {
+                startDungeonGame(true);
+            }
+        }
+        if (e.key === 'w' || e.key === 'W') {
+             if (!isDebugMode) {
+                if (effectiveGameOver || gameCleared) {
+                    signalState.active = true;
+                    signalState.type = 'W';
+                    
+                    if (isHost) signalState.p1 = !signalState.p1;
+                    else signalState.p2 = !signalState.p2;
+                    
+                    if (conn && conn.open) conn.send({ type: 'SIGNAL', key: 'W' });
+                    playSignalSound('W');
+                } else if (!signalState.active) {
+                    signalState.active = true;
+                    signalState.type = 'W';
+                    signalState.startTime = performance.now();
+                    if (isHost) signalState.p1 = true;
+                    else signalState.p2 = true;
+                    if (conn && conn.open) conn.send({ type: 'SIGNAL', key: 'W' });
+                    playSignalSound('W');
+                }
+            }
+        }
 
         if (isHost || isDebugMode) {
             if (!isDebugMode && (effectiveGameOver || gameCleared)) return; 
@@ -2579,18 +2886,6 @@ window.addEventListener('keydown', (e) => {
             }
             if (keys['z'] || keys['Z']) {
                 if (conn && conn.open) conn.send({ type: 'ATTACK' });
-                // 即時フィードバック: 音とエフェクト
-                playSE(SE.playerAttack2, 0.5, 0.05);
-                // 即時エフェクト描画 (Guest側)
-                const p = player2;
-                const [adx, ady] = DIRS[p.facing];
-                const tx = p.x + adx, ty = p.y + ady;
-                const ex = tx + 0.5 + (Math.random()-0.5)*0.2;
-                const ey = ty + 0.5 + (Math.random()-0.5)*0.2;
-                attackEffects.push({
-                    x: ex, y: ey,
-                    type: 'player', owner: 'p2', dir: p.facing, startTime: performance.now(), duration: 100
-                });
             }
         }
     } else if (gameState === 'title') {
@@ -2599,7 +2894,6 @@ window.addEventListener('keydown', (e) => {
              
              gameState='matching'; 
              titleBGM.play().catch(()=>{});
-             setTimeout(updateInputPosition, 0);
         }
     }
 });
@@ -2617,7 +2911,6 @@ window.addEventListener('blur', () => {
 function initPeer(password) {
     if (peer) return;
     isMatching = true;
-    updateInputPosition();
     
     const myId = PEER_ID_PREFIX + hashCode(password); 
     
@@ -2633,7 +2926,6 @@ function initPeer(password) {
             connectAsGuest(myId);
         } else {
             isMatching = false;
-            updateInputPosition();
             alert("通信エラーが発生しました。合言葉を変えて試してください。");
         }
     });
@@ -2669,7 +2961,7 @@ function connectAsGuest(baseId) {
     peer.on('open', () => {
         isHost = false;
         conn = peer.connect(hostId);
-        if(!conn) { alert("ホストが見つかりません"); isMatching=false; updateInputPosition(); return; }
+        if(!conn) { alert("ホストが見つかりません"); isMatching=false; return; }
         setupConnection();
     });
 }
@@ -2678,7 +2970,6 @@ function setupConnection() {
     conn.on('open', () => {
         isConnected = true;
         isMatching = false; 
-        updateInputPosition();
         if (!isHost) {
             conn.send({ type: 'NAME', name: nameEl.value });
         }
@@ -2687,23 +2978,29 @@ function setupConnection() {
     conn.on('data', (data) => {
         if (isHost) {
             if (data.type === 'MOVE') {
+                // 入力消失修正: キューへ蓄積
                 guestInputQueue.push({ type: 'MOVE', dx: data.dx, dy: data.dy });
             } else if (data.type === 'ATTACK') {
+                // 入力消失修正: キューへ蓄積
                 guestInputQueue.push({ type: 'ATTACK' });
-            } else if (data.type === 'VOTE') {
-                guestInputQueue.push({ type: 'VOTE', kind: data.kind });
+            } else if (data.type === 'SIGNAL') {
+                if (isGameOver || gameCleared) {
+                    signalState.active = true;
+                    signalState.type = data.key;
+                    signalState.p2 = !signalState.p2; 
+                } else {
+                    signalState.active = true;
+                    signalState.type = data.key;
+                    if (!signalState.startTime) signalState.startTime = performance.now();
+                    signalState.p2 = true; 
+                }
+                playSignalSound(data.key);
             }
             else if (data.type === 'NAME') {
                 otherPlayerName = data.name;
             }
-            else if (data.type === 'SE') {
-                if (data.name === 'blip') playElectronicBlip();
-            }
         } else {
             if (data.type === 'SYNC') {
-                const prevGameOver = isGameOver;
-                const prevGameClear = gameCleared;
-
                 player1.x = data.p1.x; player1.y = data.p1.y; player1.facing = data.p1.f; player1.stepCount = data.p1.sc;
                 player2.x = data.p2.x; player2.y = data.p2.y; player2.facing = data.p2.f; player2.stepCount = data.p2.sc;
                 hpP1 = data.hp.p1; hpP2 = data.hp.p2;
@@ -2720,46 +3017,24 @@ function setupConnection() {
 
                 if (goblins.length !== data.g.length) goblins = new Array(data.g.length).fill({});
                 data.g.forEach((gData, i) => {
-                        goblins[i] = {
-                           x: gData.x, y: gData.y, facing: gData.f, state: gData.s, hp: gData.hp, 
-                           sizeScale: gData.sc, bobOffset: gData.bo, 
-                           deathTime: gData.dt, deathAngle: gData.da, dissolveProgress: gData.dp,
-                           isCasting: gData.ic
-                        };
+                      goblins[i] = {
+                          x: gData.x, y: gData.y, facing: gData.f, state: gData.s, hp: gData.hp,
+                          sizeScale: gData.sc, bobOffset: gData.bo, 
+                          deathTime: gData.dt, deathAngle: gData.da, dissolveProgress: gData.dp,
+                          isCasting: gData.ic
+                      };
                 });
                 
-                voteState = data.vote; 
+                signalState = data.sig;
                 fixedTime = data.t;
                 gameCleared = data.cl;
                 isGameOver = data.go;
                 isGreyMode = data.gm;
-                isFriendlyFire = data.ff; 
+                isFriendlyFire = data.ff; // FF設定をホストから受信して同期
                 
                 otherPlayerName = data.hn;
 
-                // 強制表示ロジック（Game Over）
-                if (isGameOver) {
-                    timerStopped = true;
-                    const rankEl = document.getElementById('result-rank');
-                    if (rankEl.style.display === 'none') {
-                        showResult();
-                    }
-                }
-                
-                if (!prevGameClear && gameCleared) {
-                    stopCurrentBgm(); 
-                    if (!isGreyMode) { clearBGM.play().catch(()=>{}); }
-                    showResult();
-                }
-                // 強制表示ロジック（Clear）
-                if (gameCleared) {
-                    const rankEl = document.getElementById('result-rank');
-                    if (rankEl.style.display === 'none') {
-                        stopCurrentBgm();
-                        if (!isGreyMode) { clearBGM.play().catch(()=>{}); }
-                        showResult();
-                    }
-                }
+                updateInputPosition();
 
             } else if (data.type === 'START') {
                 startDungeonGame(false, { 
@@ -2767,25 +3042,21 @@ function setupConnection() {
                     colorIdx: data.colorIdx, 
                     normalIdx: data.normalIdx, 
                     rageIdx: data.rageIdx,
-                    playCount: data.playCount,
-                    ff: data.ff 
+                    playCount: data.playCount 
                 });
                 
             } else if (data.type === 'SPAWN_EFFECT') {
                 if (data.kind === 'goblin') {
-                        attackEffects.push({
-                           x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
-                        });
-                        const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); 
-                        playSE(SE.goblinAttack, 0.7, 0.15, pitch);
+                      attackEffects.push({
+                          x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
+                      });
+                      const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); 
+                      playSE(SE.goblinAttack, 0.7, 0.15, pitch);
                 } else if (data.kind === 'player') {
-                      const isMe = !isHost && data.owner === 'p2';
-                      if (!isMe) {
-                          attackEffects.push({
-                              x: data.x, y: data.y, type: 'player', owner: data.owner, dir: data.dir, startTime: performance.now(), duration: 100
-                          });
-                          playSE(data.owner==='p1'?SE.playerAttack1:SE.playerAttack2, 0.5, 0.05);
-                      }
+                      attackEffects.push({
+                          x: data.x, y: data.y, type: 'player', owner: data.owner, dir: data.dir, startTime: performance.now(), duration: 100
+                      });
+                      playSE(data.owner==='p1'?SE.playerAttack1:SE.playerAttack2, 0.5, 0.05);
                 }
             } else if (data.type === 'PLAYER_HIT') {
                 const p = data.target === 'p1' ? player1 : player2;
@@ -2793,8 +3064,6 @@ function setupConnection() {
                 playSE(data.target==='p1'?SE.playerHit1:SE.playerHit2, 0.9, 0.05);
             } else if (data.type === 'GO_TITLE') {
                 location.reload();
-            } else if (data.type === 'SE') {
-                if (data.name === 'blip') playElectronicBlip();
             }
         }
     });
