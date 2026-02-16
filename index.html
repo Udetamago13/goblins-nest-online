@@ -50,14 +50,13 @@
             --bright: 1.0; 
         }
         
-        /* Whiteout Layer (Lightweight CSS Overlay) */
         #whiteout-layer {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: white; 
             opacity: 0; 
             pointer-events: none; 
             z-index: 50;
-            transition: opacity 1.5s ease-in; /* Default fade-in speed */
+            transition: opacity 1.5s ease-in;
         }
         .whiteout-active { opacity: 1 !important; }
         
@@ -311,7 +310,7 @@ const IFRAME_DURATION = 500;
 const SMELL_RADIUS = 3;
 const SIGHT_RADIUS = 7;
 const ATTACK_COOLDOWN = 0.1;
-const MOVE_COOLDOWN = 130; // ms
+const MOVE_COOLDOWN = 130; 
 
 const STATE = { IDLE: 'idle', ALERT: 'alert', LOCK: 'lock', RAGE: 'rage', CHARGE: 'charge', REAPPEAR: 'reappear', DYING: 'dying' };
 
@@ -409,7 +408,6 @@ const SE_POOLS = {
 };
 
 let grid = [], floorVariant = [];
-// Added lastMoveTime for cooldown
 let player1 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0, deathDir: 0, lastMoveTime: 0};
 let player2 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0, deathDir: 0, lastMoveTime: 0};
 let daughter = {x: 0, y: 0, rescued: false, rescuer: null};
@@ -489,12 +487,12 @@ function updateBrightnessFilter() {
 } 
 
 function triggerWhiteout() {
-    whiteoutLayer.style.transition = "opacity 1.5s ease-in"; // Fade In (Slow)
+    whiteoutLayer.style.transition = "opacity 1.5s ease-in";
     whiteoutLayer.classList.add('whiteout-active');
 }
 
 function resolveWhiteout() {
-    whiteoutLayer.style.transition = "opacity 3.0s ease-out"; // Fade Out (Very Slow)
+    whiteoutLayer.style.transition = "opacity 3.0s ease-out"; 
     whiteoutLayer.classList.remove('whiteout-active');
     isWhiteoutTransitioning = false;
 }
@@ -511,7 +509,6 @@ function update() {
     if(titleBGM) titleBGM.volume = realBGMVol;
     if(clearBGM) clearBGM.volume = realBGMVol;
     
-    // --- [FIX] Integrated BGM Volume Logic ---
     if(currentAudio) {
         if (currentFadeVolume < 1.0) {
             currentFadeVolume += 0.015; 
@@ -521,7 +518,6 @@ function update() {
         let baseVol = (currentMusicState==='rage' ? 0.5 : 0.4) * realBGMVol * 2.5;
         let finalVol = baseVol * currentFadeVolume;
 
-        // If Grey Mode and current track is greyBGM, apply distance attenuation
         if (isGreyMode && currentAudio === greyBGM && gameState === 'game' && !gameCleared && !isGameOver) {
              let greyVolFactor = 0.0;
              let minDist = Infinity;
@@ -546,6 +542,9 @@ function update() {
     }
 
     if (gameState === 'game') {
+        // [FIX] Handle Input in Game Loop for Smoothness
+        handleInput();
+
         if (!foundDaughterNotified && daughter.rescued) {
              foundDaughter = true;
              foundDaughterNotified = true;
@@ -566,7 +565,7 @@ function update() {
                 while (guestInputQueue.length > 0 && processed < 5) {
                     const input = guestInputQueue.shift();
                     if (input.type === 'MOVE') {
-                        // [FIX] Cooldown check for Guest input on Host
+                        // Guest Cooldown on Host Side
                         const now = performance.now();
                         if (now - player2.lastMoveTime >= MOVE_COOLDOWN) {
                              movePlayer(player2, input.dx, input.dy);
@@ -626,7 +625,7 @@ function update() {
                             gm: isGreyMode,
                             hn: nameEl.value,
                             ff: isFriendlyFire,
-                            wo: isWhiteoutTransitioning // Sync whiteout state
+                            wo: isWhiteoutTransitioning
                         };
                         conn.send(state);
                         lastSyncTime = now;
@@ -652,6 +651,85 @@ function update() {
     draw(); 
     requestAnimationFrame(update);
 } 
+
+// [FIX] New Input Handler called from update()
+function handleInput() {
+    if (gameState !== 'game') return;
+    const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
+    const now = performance.now();
+
+    if (isHost || isDebugMode) {
+        if (!isDebugMode && !isGreyMode && (effectiveGameOver || gameCleared)) return;
+
+        let dx = 0, dy = 0;
+        if (keys['ArrowUp']) dy = -1;
+        else if (keys['ArrowDown']) dy = 1;
+        else if (keys['ArrowLeft']) dx = -1;
+        else if (keys['ArrowRight']) dx = 1;
+        
+        if ((dx !== 0 || dy !== 0) && now - player1.lastMoveTime >= MOVE_COOLDOWN) {
+             movePlayer(player1, dx, dy);
+        }
+        
+        if (keys['z'] || keys['Z']) {
+             // Attack has its own cooldown check in playerAttack
+             playerAttack(player1);
+        }
+
+        if (isDebugMode) {
+            let d2x = 0, d2y = 0;
+            if (keys['w'] || keys['W']) d2y = -1;
+            else if (keys['s'] || keys['S']) d2y = 1;
+            else if (keys['a'] || keys['A']) d2x = -1;
+            else if (keys['d'] || keys['D']) d2x = 1;
+            
+            if ((d2x !== 0 || d2y !== 0) && now - player2.lastMoveTime >= MOVE_COOLDOWN) {
+                 movePlayer(player2, d2x, d2y);
+            }
+            if (keys['x'] || keys['X']) playerAttack(player2);
+        }
+        
+        if (isDebugMode && (keys['r'] || keys['R'])) {
+             // Simple debounce for R
+             if (!keys['r_lock']) {
+                 startDungeonGame(true, null);
+                 keys['r_lock'] = true;
+                 setTimeout(() => keys['r_lock'] = false, 500);
+             }
+        }
+    } else {
+        if (effectiveGameOver || gameCleared) return; 
+
+        let dx = 0, dy = 0;
+        if (keys['ArrowUp']) dy = -1;
+        else if (keys['ArrowDown']) dy = 1;
+        else if (keys['ArrowLeft']) dx = -1;
+        else if (keys['ArrowRight']) dx = 1;
+
+        if (dx !== 0 || dy !== 0) {
+            // Guest Client Side Throttling
+            if (now - player2.lastMoveTime >= MOVE_COOLDOWN) {
+                if (conn && conn.open) conn.send({ type: 'MOVE', dx: dx, dy: dy });
+                player2.lastMoveTime = now;
+            }
+        }
+        if (keys['z'] || keys['Z']) {
+            if (conn && conn.open) conn.send({ type: 'ATTACK' });
+            playSE(SE_POOLS.playerAttack2, 0.5, 0.05);
+            const p = player2;
+            const [adx, ady] = DIRS[p.facing];
+            const tx = p.x + adx, ty = p.y + ady;
+            const ex = tx + 0.5 + (Math.random()-0.5)*0.2;
+            const ey = ty + 0.5 + (Math.random()-0.5)*0.2;
+            attackEffects.push({
+                x: ex, y: ey,
+                type: 'player', owner: 'p2', dir: p.facing, startTime: performance.now(), duration: 100
+            });
+            // Prevent spamming
+            keys['z'] = false; 
+        }
+    }
+}
 
 function updateInputPosition() {
     const rect = canvas.getBoundingClientRect();
@@ -908,7 +986,6 @@ function stopCurrentBgm() {
         currentAudio.currentTime = 0;
         currentAudio = null; 
     }
-    // No separate pause for greyBGM needed as it is handled by currentAudio
     currentMusicState = 'normal';
 }
 
@@ -938,7 +1015,6 @@ function playAndFadeIn(srcOrAudio, targetVolRatio, fadeDuration = 600) {
         }
     });
     
-    // Assign to currentAudio regardless of type
     currentAudio = audio;
     
     if(isDebugMode) {
@@ -1081,10 +1157,8 @@ function calculateShortestPath() {
 function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     isDebugMode = debugFlag; 
     guestInputQueue = []; 
-    // [FIX] Reset Input State on Restart
     for (let k in keys) keys[k] = false;
 
-    // Ver.4.2 Whiteout Resolution
     resolveWhiteout();
 
     const prefix = isDebugMode ? S_KEY_PREFIX_DEBUG : S_KEY_PREFIX_REAL;
@@ -1167,7 +1241,6 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     voteState = { p1: null, p2: null }; 
     agreedAction = null;
 
-    // Reset lastMoveTime for safety
     player1.lastMoveTime = 0;
     player2.lastMoveTime = 0;
 
@@ -1966,13 +2039,10 @@ function damagePlayer(p, amount) {
         if (isGreyMode) {
              if ((isHost || isDebugMode) && !isGameOver && !gameCleared && !isWhiteoutTransitioning) {
                  isWhiteoutTransitioning = true;
-                 
-                 // Notify Grey Reset (Whiteout)
                  if (conn && conn.open) conn.send({type: 'GREY_RESET_START'});
                  triggerWhiteout();
                  
                  setTimeout(() => {
-                     // Generate new dungeon while screen is white
                      startDungeonGame(false, null);
                      isWhiteoutTransitioning = false;
                  }, 2000);
@@ -1982,7 +2052,6 @@ function damagePlayer(p, amount) {
                 isGameOver = true; timerStopped = true;
                 player1.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
                 player2.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
-                
                 showResult();
             }
         }
@@ -2004,7 +2073,7 @@ function movePlayer(p, dx, dy) {
         !isBlockedForPlayer(nx, ny) && !(nx === other.x && ny === other.y)) {
         p.x = nx; p.y = ny;
         p.stepCount++; 
-        p.lastMoveTime = performance.now(); // Update move time on success
+        p.lastMoveTime = performance.now(); 
 
         if (healingBiscuit.active && nx === healingBiscuit.x && ny === healingBiscuit.y) {
             healingBiscuit.active = false;
@@ -2135,594 +2204,74 @@ function showResult() {
     document.getElementById('rank-time').innerText = `Time: ${fixedTime.toFixed(2)}s`;
 } 
 
-function drawGameScreen() {
-    ctx.fillStyle = "#111"; ctx.fillRect(0,0,VIRTUAL_WIDTH,VIRTUAL_HEIGHT);
+function drawAnalogClock() {
+    const clockX = VIRTUAL_WIDTH - 60;
+    const clockY = 60;
+    const r = 40;
     
-    const now = performance.now();
-    
-    let targetPlayer = player1;
-    if (!isHost && !isDebugMode) {
-        targetPlayer = player2; 
-    }
-    
-    let vx = targetPlayer.x - VIEW_TILES_X/2;
-    let vy = targetPlayer.y - VIEW_TILES_Y/2;
-    vx = Math.max(0, Math.min(vx, GRID_W - VIEW_TILES_X));
-    vy = Math.max(0, Math.min(vy, GRID_H - VIEW_TILES_Y));
-
-    if(!floorDrawn) renderFloorCanvas();
     ctx.save();
+    ctx.translate(clockX, clockY);
     
-    ctx.translate(GAME_OFFSET_X, GAME_OFFSET_Y);
-    
-    ctx.imageSmoothingEnabled = false;
-    
-    ctx.drawImage(floorCanvas, Math.floor(vx*SCALED_TILE), Math.floor(vy*SCALED_TILE), DARKNESS_WIDTH, DARKNESS_HEIGHT, 0, 0, DARKNESS_WIDTH, DARKNESS_HEIGHT);
-    
-    const drawSprite = (img, gx, gy, scaleX=1, scaleY=1, offsetY=0, filter='', rotation=0, originY=0) => {
-        if (gx < vx || gx >= vx+VIEW_TILES_X || gy < vy || gy >= vy+VIEW_TILES_Y) return;
-        const dx = (gx - vx) * SCALED_TILE;
-        const dy = (gy - vy) * SCALED_TILE;
-        const dw = SCALED_TILE * Math.abs(scaleX);
-        const dh = SCALED_TILE * scaleY;
-        const drawX = dx + (SCALED_TILE - dw)/2;
-        const drawY = dy + SCALED_TILE - dh + offsetY;
-        
-        ctx.save();
-        ctx.translate(Math.floor(drawX + dw/2), Math.floor(drawY + dh - originY));
-        ctx.rotate(rotation);
-        ctx.translate(-Math.floor(drawX + dw/2), -Math.floor(drawY + dh - originY));
-        
-        if(filter) ctx.filter = filter;
-        if(scaleX < 0) {
-             ctx.translate(Math.floor(drawX + dw), Math.floor(drawY)); ctx.scale(-1, 1); ctx.drawImage(img, 0, 0, dw, dh);
-        } else {
-             ctx.drawImage(img, Math.floor(drawX), Math.floor(drawY), dw, dh);
-        }
-        ctx.restore();
-    };
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fill();
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 2;
+    ctx.stroke();
 
-    if (healingBiscuit.active) {
-        drawSprite(biscuitImg, healingBiscuit.x, healingBiscuit.y, 0.2, 0.2, 0, "drop-shadow(0 0 4px #ffff00)");
+    const curTime = (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime;
+    const angle = (curTime % 60) / 60 * (Math.PI * 2) - Math.PI/2;
+    
+    ctx.beginPath();
+    ctx.moveTo(0,0);
+    ctx.lineTo(Math.cos(angle)*(r-5), Math.sin(angle)*(r-5));
+    ctx.strokeStyle = "red";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    if (!daughter.rescued) {
+        let dx = daughter.x - (isHost ? player1.x : player2.x);
+        let dy = daughter.y - (isHost ? player1.y : player2.y);
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 0) {
+             let dAngle = Math.atan2(dy, dx);
+             let radarR = Math.min(r-5, dist * 2); 
+             ctx.fillStyle = "#ff00ff";
+             ctx.beginPath();
+             ctx.arc(Math.cos(dAngle)*radarR, Math.sin(dAngle)*radarR, 3, 0, Math.PI*2);
+             ctx.fill();
+        }
     }
-
-    if (isGreyMode && greyCircleImg.complete) {
-        psychicArrays.forEach(a => {
-            const t = now - a.startTime;
-            if (t <= a.duration) {
-                const ratio = t / a.duration; 
-                const curSize = SCALED_TILE + (SCALED_TILE * 2 * ratio); 
-                const dx = (a.x - vx) * SCALED_TILE + SCALED_TILE/2;
-                const dy = (a.y - vy) * SCALED_TILE + SCALED_TILE/2;
-                
-                ctx.save();
-                ctx.globalCompositeOperation = 'screen';
-                ctx.translate(Math.floor(dx), Math.floor(dy));
-                ctx.globalAlpha = 1.0 - (ratio * 0.3);
-                ctx.drawImage(greyCircleImg, -curSize/2, -curSize/2, curSize, curSize);
-                ctx.restore();
-            }
-        });
-    }
-
-    goblins.forEach(g => {
-        if(g.hp <= 0 && g.state !== STATE.DYING) return; 
-        
-        if (isGreyMode) {
-            let currentScale = g.sizeScale;
-            
-            if (g.state === STATE.DYING) {
-                currentScale = g.sizeScale * (1.0 - g.dissolveProgress);
-                const filterStr = `brightness(0)`; 
-                const floatOffset = -(SCALED_TILE * g.sizeScale * 0.5 * g.dissolveProgress);
-                drawSprite(greyImg, g.x, g.y, currentScale, currentScale, floatOffset, filterStr);
-                return;
-            }
-
-            if (g.state === STATE.CHARGE) {
-                const elapsed = now - g.chargeStartTime;
-                const progress = Math.min(elapsed / 1000, 1.0);
-                currentScale = Math.max(0.01, g.sizeScale * (1.0 - progress));
-            } else if (g.state === STATE.REAPPEAR) {
-                const elapsed = now - g.reappearStartTime;
-                const progress = Math.min(elapsed / 1000, 1.0);
-                currentScale = Math.max(0.01, g.sizeScale * progress);
-            }
-            
-            let filterStr = '';
-            if (g.isCasting) {
-                const glow = Math.abs(Math.sin(now / 150)); 
-                filterStr = `drop-shadow(0 0 ${10 * glow}px #ffff00) brightness(${1 + glow})`;
-            }
-            drawSprite(greyImg, g.x, g.y, currentScale, currentScale, 0, filterStr); 
-        } else {
-            const bob = Math.abs(Math.sin((now + g.bobOffset) / 150)) * 5; 
-            let img = goblinImages.front;
-            let scaleX = g.sizeScale; 
-            if(g.facing === 0) img = goblinImages.back;
-            else if(g.facing === 1) img = goblinImages.side; 
-            else if(g.facing === 3) { img = goblinImages.side; scaleX *= -1; }
-            
-            let filter = g.isGiant ? 'sepia(0.5) hue-rotate(-30deg) brightness(0.9) contrast(0.8)' : '';
-            
-            let rotation = 0;
-            
-            if (g.state === STATE.DYING) {
-                filter = 'brightness(0.6) sepia(0.4) saturate(0.3)';
-                rotation = g.deathAngle;
-                ctx.save();
-                ctx.globalAlpha = 1.0 - g.dissolveProgress; 
-            }
-
-            drawSprite(img, g.x, g.y, scaleX, g.sizeScale, -bob, filter, rotation, 5);
-
-            if (g.state === STATE.DYING) {
-                ctx.restore(); 
-            }
-        }
-    });
-
-    if(!daughter.rescued) drawSprite(daughterImg, daughter.x, daughter.y);
-
-    [player1, player2].forEach(p => {
-        const isP2 = p === player2;
-        const isDead = (hpP1 <= 0 || hpP2 <= 0) || isGameOver; 
-        const shake = (now - p.hitShakeTime < HIT_SHAKE_DURATION) ? (Math.random()*6-3) : 0; 
-        
-        let img = playerImages.front;
-        let sx = 1;
-        
-        if (isDead && !isDebugMode) {
-             let rot = (Math.PI / 2) * (p.deathDir || 1); 
-             ctx.save();
-             drawSprite(playerImages.side, p.x, p.y, 1, 1, 0, 'brightness(0)', rot, 5);
-             ctx.restore();
-        } 
-        else {
-            if (p.facing === 0) { 
-                img = playerImages.back; if (p.stepCount % 2 !== 0) sx = -1;
-            }
-            else if (p.facing === 2) { 
-                img = playerImages.front; if (p.stepCount % 2 !== 0) sx = -1;
-            }
-            else if (p.facing === 1) { 
-                img = (p.stepCount % 2 === 0) ? playerImages.right1 : playerImages.right2; 
-            }
-            else if (p.facing === 3) { 
-                img = (p.stepCount % 2 === 0) ? playerImages.right1 : playerImages.right2; sx = -1;
-            }
-            
-            if (daughter.rescued && daughter.rescuer === (isP2?'p2':'p1') && !isDead) {
-                drawSprite(daughterImg, p.x, p.y, 0.7, 0.7, -30 + shake);
-            }
-            
-            const filterStr = isP2 ? 'hue-rotate(120deg)' : '';
-            drawSprite(img, p.x, p.y, sx, 1, shake, filterStr);
-        }
-
-        if (p.x >= vx && p.x < vx+VIEW_TILES_X && p.y >= vy && p.y < vy+VIEW_TILES_Y) {
-            let label = "";
-            const isMe = (isHost || isDebugMode) ? (p === player1) : (p === player2);
-            
-            if (isMe) {
-                label = nameEl.value;
-            } else {
-                if (isDebugMode) {
-                    label = "相棒";
-                } else {
-                    label = otherPlayerName || "相棒";
-                }
-            }
-
-            if (label && !isDead) { 
-                ctx.save();
-                const nameDx = (p.x - vx) * SCALED_TILE + SCALED_TILE/2;
-                const nameDy = (p.y - vy) * SCALED_TILE - 15 + shake;
-                ctx.textAlign = "center"; ctx.textBaseline = "bottom";
-                
-                ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-                ctx.strokeStyle = "rgba(0, 0, 0, 0.7)"; ctx.lineWidth = 2;
-                
-                const maxWidth = SCALED_TILE * 3;
-                const fontSize = 20;
-                ctx.font = `${fontSize}px 'DotGothic16'`;
-                const textWidth = ctx.measureText(label).width;
-                
-                let scaleFactor = 1;
-                if (textWidth > maxWidth) {
-                    scaleFactor = maxWidth / textWidth;
-                }
-                
-                ctx.translate(Math.floor(nameDx), Math.floor(nameDy));
-                ctx.scale(scaleFactor, 1);
-                ctx.strokeText(label, 0, 0);
-                ctx.fillText(label, 0, 0);
-                
-                ctx.restore();
-            }
-        }
-    });
-
-    darknessCtx.globalCompositeOperation = 'source-over';
-    darknessCtx.fillStyle = '#000'; darknessCtx.fillRect(0,0,DARKNESS_WIDTH,DARKNESS_HEIGHT);
     
-    const drawVision = (p) => {
-        if(p.x>=vx && p.x<vx+VIEW_TILES_X && p.y>=vy && p.y<vy+VIEW_TILES_Y){
-            const cx = (p.x-vx)*SCALED_TILE + SCALED_TILE/2;
-            const cy = (p.y-vy)*SCALED_TILE + SCALED_TILE/2;
-            
-            darknessCtx.globalCompositeOperation = 'destination-out';
-            darknessCtx.drawImage(visionHoleCanvas, Math.floor(cx - visionRadius), Math.floor(cy - visionRadius));
-
-            if (isGreyMode) {
-                darknessCtx.globalCompositeOperation = 'source-over';
-                darknessCtx.drawImage(dreamyGlowCanvas, Math.floor(cx - visionRadius), Math.floor(cy - visionRadius));
-                darknessCtx.globalCompositeOperation = 'destination-out'; 
-            }
-        }
-    }; 
-    
-    drawVision(player1);
-    drawVision(player2);
-    ctx.drawImage(darknessCanvas, 0, 0);
-
-    attackEffects = attackEffects.filter(e => now - e.startTime < e.duration);
-    attackEffects.forEach(e => {
-        if (e.x < vx || e.x >= vx+VIEW_TILES_X || e.y < vy || e.y >= vy+VIEW_TILES_Y) return;
-        const t = (now - e.startTime) / e.duration;
-        const sc = ATTACK_SCALE_START - t*(ATTACK_SCALE_START-1);
-        const dx = (e.x - vx)*SCALED_TILE, dy = (e.y - vy)*SCALED_TILE;
-        ctx.save(); 
-        ctx.translate(Math.floor(dx), Math.floor(dy)); 
-        ctx.scale(sc, sc);
-        if(e.type==='goblin') ctx.drawImage(goblinAttackImg, -SCALED_TILE/2, -SCALED_TILE/2, SCALED_TILE, SCALED_TILE);
-        else {
-            if(e.owner==='p2') ctx.filter='invert(1)';
-            ctx.drawImage(playerAttackImg, -SCALED_TILE/2, -SCALED_TILE/2, SCALED_TILE, SCALED_TILE); 
-        }
-        ctx.restore();
-    });
-
-    ctx.restore(); 
-
-    // Result Screen Voting
-    if (isGameOver || gameCleared) {
-        const myVote = (isHost || isDebugMode) ? voteState.p1 : voteState.p2;
-        const otherVote = (isHost || isDebugMode) ? voteState.p2 : voteState.p1;
-        const isBlink = Math.floor(Date.now() / 400) % 2 === 0;
-
-        const drawVoteBtn = (x, y, type, labelDefault) => {
-            const w = 160, h = 60;
-            const isMyVote = myVote === type;
-            const isOtherVote = otherVote === type;
-            const isAgreed = isMyVote && isOtherVote;
-
-            let text = labelDefault;
-            let style = "normal"; 
-
-            if (isAgreed) {
-                text = "合意";
-                style = "agreed";
-            } else if (isMyVote) {
-                text = "提案";
-                style = "pending";
-            } else if (isOtherVote) {
-                text = "要請";
-                style = "request";
-            }
-
-            ctx.save();
-            ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            ctx.font = "30px 'DotGothic16'";
-            
-            if (style === "agreed") {
-                ctx.fillStyle = "#ff0000"; 
-                ctx.fillRect(x - w/2, y - h/2, w, h);
-                ctx.strokeStyle = "#ffaaaa"; ctx.lineWidth = 4;
-                ctx.strokeRect(x - w/2, y - h/2, w, h);
-                ctx.fillStyle = "white";
-            } else if (style === "pending") {
-                if (isBlink) {
-                    ctx.strokeStyle = "#ffff00"; ctx.lineWidth = 4;
-                    ctx.strokeRect(x - w/2, y - h/2, w, h);
-                    ctx.fillStyle = "#ffff00";
-                } else {
-                    ctx.strokeStyle = "#555"; ctx.lineWidth = 4;
-                    ctx.strokeRect(x - w/2, y - h/2, w, h);
-                    ctx.fillStyle = "#888";
-                }
-            } else if (style === "request") {
-                if (isBlink) {
-                    ctx.strokeStyle = "#00ffff"; ctx.lineWidth = 4;
-                    ctx.strokeRect(x - w/2, y - h/2, w, h);
-                    ctx.fillStyle = "#00ffff";
-                } else {
-                    ctx.strokeStyle = "#555"; ctx.lineWidth = 4;
-                    ctx.strokeRect(x - w/2, y - h/2, w, h);
-                    ctx.fillStyle = "#888";
-                }
-            } else {
-                ctx.strokeStyle = "white"; ctx.lineWidth = 2;
-                ctx.strokeRect(x - w/2, y - h/2, w, h);
-                ctx.fillStyle = "white";
-            }
-            
-            ctx.fillText(text, x, y - 4);
-            ctx.restore();
-        };
-
-        const RESTART_X = 200, RESTART_Y = VIRTUAL_HEIGHT - 60;
-        const RETURN_X = VIRTUAL_WIDTH - 200, RETURN_Y = VIRTUAL_HEIGHT - 60;
-
-        const leftLabel = gameCleared ? "続行" : "再起";
-        drawVoteBtn(RESTART_X, RESTART_Y, 'restart', leftLabel);
-        drawVoteBtn(RETURN_X, RETURN_Y, 'return', "帰還");
-    } else if (!isGameOver && !gameCleared && !isDebugMode && gameState === 'game') {
-        // Retreat Button Logic
-        const myVote = (isHost || isDebugMode) ? voteState.p1 : voteState.p2;
-        const otherVote = (isHost || isDebugMode) ? voteState.p2 : voteState.p1;
-        const isBlink = Math.floor(Date.now() / 400) % 2 === 0;
-        
-        const x = 120, y = VIRTUAL_HEIGHT - 50;
-        const w = 120, h = 50;
-        
-        const isMyVote = myVote === 'retreat';
-        const isOtherVote = otherVote === 'retreat';
-        const isAgreed = isMyVote && isOtherVote;
-
-        let text = "撤退";
-        let style = "normal";
-
-        if (isAgreed) {
-            text = "合意"; style = "agreed";
-        } else if (isMyVote) {
-            text = "提案"; style = "pending";
-        } else if (isOtherVote) {
-            text = "要請"; style = "request";
-        }
-
-        ctx.save();
-        ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.font = "24px 'DotGothic16'";
-        
-        if (style === "agreed") {
-            ctx.fillStyle = "#ff0000"; ctx.fillRect(x - w/2, y - h/2, w, h);
-            ctx.strokeStyle = "#ffaaaa"; ctx.lineWidth = 4; ctx.strokeRect(x - w/2, y - h/2, w, h);
-            ctx.fillStyle = "white";
-        } else if (style === "pending") {
-            if (isBlink) {
-                ctx.strokeStyle = "#ffff00"; ctx.lineWidth = 4; ctx.strokeRect(x - w/2, y - h/2, w, h);
-                ctx.fillStyle = "#ffff00";
-            } else {
-                ctx.strokeStyle = "#555"; ctx.lineWidth = 4; ctx.strokeRect(x - w/2, y - h/2, w, h);
-                ctx.fillStyle = "#888";
-            }
-        } else if (style === "request") {
-            if (isBlink) {
-                ctx.strokeStyle = "#00ffff"; ctx.lineWidth = 4; ctx.strokeRect(x - w/2, y - h/2, w, h);
-                ctx.fillStyle = "#00ffff";
-            } else {
-                ctx.strokeStyle = "#555"; ctx.lineWidth = 4; ctx.strokeRect(x - w/2, y - h/2, w, h);
-                ctx.fillStyle = "#888";
-            }
-        } else {
-            ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 2; ctx.strokeRect(x - w/2, y - h/2, w, h);
-            ctx.fillStyle = "rgba(255,255,255,0.5)";
-        }
-        ctx.fillText(text, x, y - 2);
-        ctx.restore();
-    }
-} 
-
-function getMousePos(e) {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    return {
-        x: ((e.clientX || e.touches[0].clientX) - rect.left) * scaleX,
-        y: ((e.clientY || e.touches[0].clientY) - rect.top) * scaleY
-    };
+    ctx.restore();
 }
 
-const saveVolume = () => {
-    if (isDraggingBGM || isDraggingSE || isDraggingBright) {
-        safeSetItem('goblinsNest_bgmVol', bgmVolume);
-        safeSetItem('goblinsNest_seVol', seVolume);
-        safeSetItem('goblinsNest_bright', brightnessLevel);
-    }
-    isDraggingBGM = isDraggingSE = isDraggingBright = false;
-}; 
-
-canvas.addEventListener('mousedown', handleDown);
-window.addEventListener('mousemove', (e) => {
-    if (!isDraggingBGM && !isDraggingSE && !isDraggingBright) return;
-    const pos = getMousePos(e);
-    let vol = Math.max(0, Math.min(1, (pos.x - UI_X) / BAR_W));
-    
-    if (isDraggingBGM) bgmVolume = vol;
-    if (isDraggingSE) seVolume = vol;
-    if (isDraggingBright) {
-        brightnessLevel = vol;
-        updateBrightnessFilter();
-    }
-});
-window.addEventListener('mouseup', saveVolume);
-canvas.addEventListener('touchstart', (e) => { if(gameState!=='game') { e.preventDefault(); handleDown(e); } }, {passive:false});
-window.addEventListener('touchend', saveVolume);
-
-nameEl.addEventListener('input', (e) => {
-    if (e.isComposing) return;
-    safeSetItem('goblinsNest_name', nameEl.value);
-});
-passEl.addEventListener('input', (e) => {
-    if (e.isComposing) return;
-    passEl.value = passEl.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)).replace(/[^a-zA-Z0-9]/g, '');
-    safeSetItem('goblinsNest_pass', passEl.value);
-});
-
-const keys = {};
-window.addEventListener('keydown', (e) => {
-    if (e.isComposing || e.keyCode === 229) return;
-    
-    keys[e.key] = true;
-    if (gameState === 'game') {
-        const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
-
-        if (isHost || isDebugMode) {
-            // Instant Reset Logic for Grey Mode prevents effectiveGameOver check blocking input
-            if (!isDebugMode && !isGreyMode && (effectiveGameOver || gameCleared)) return; 
-
-            let dx = 0, dy = 0;
-            if (keys['ArrowUp']) dy = -1;
-            else if (keys['ArrowDown']) dy = 1;
-            else if (keys['ArrowLeft']) dx = -1;
-            else if (keys['ArrowRight']) dx = 1;
-            
-            // [FIX] Cooldown check for Local Player 1
-            const now = performance.now();
-            if ((dx !== 0 || dy !== 0) && now - player1.lastMoveTime >= MOVE_COOLDOWN) {
-                 movePlayer(player1, dx, dy);
-            }
-            
-            if (keys['z'] || keys['Z']) playerAttack(player1);
-            
-            if (isDebugMode && (keys['r'] || keys['R'])) {
-                 startDungeonGame(true, null);
-            }
-
-            if (isDebugMode) {
-                let d2x = 0, d2y = 0;
-                if (keys['w'] || keys['W']) d2y = -1;
-                else if (keys['s'] || keys['S']) d2y = 1;
-                else if (keys['a'] || keys['A']) d2x = -1;
-                else if (keys['d'] || keys['D']) d2x = 1;
-                
-                // [FIX] Cooldown check for Debug Player 2
-                if ((d2x !== 0 || d2y !== 0) && now - player2.lastMoveTime >= MOVE_COOLDOWN) {
-                     movePlayer(player2, d2x, d2y);
-                }
-                
-                if (keys['x'] || keys['X']) playerAttack(player2);
-            }
-        } else {
-            if (effectiveGameOver || gameCleared) return; 
-
-            let dx = 0, dy = 0;
-            if (keys['ArrowUp']) dy = -1;
-            else if (keys['ArrowDown']) dy = 1;
-            else if (keys['ArrowLeft']) dx = -1;
-            else if (keys['ArrowRight']) dx = 1;
-
-            if (dx !== 0 || dy !== 0) {
-                // [FIX] Cooldown check for Guest Client
-                const now = performance.now();
-                // Guest uses player2 object locally for cooldown tracking
-                if (now - player2.lastMoveTime >= MOVE_COOLDOWN) {
-                    if (conn && conn.open) conn.send({ type: 'MOVE', dx: dx, dy: dy });
-                    // Optimistic cooldown update on client side to prevent spamming packets
-                    player2.lastMoveTime = now;
-                }
-            }
-            if (keys['z'] || keys['Z']) {
-                if (conn && conn.open) conn.send({ type: 'ATTACK' });
-                playSE(SE_POOLS.playerAttack2, 0.5, 0.05);
-                const p = player2;
-                const [adx, ady] = DIRS[p.facing];
-                const tx = p.x + adx, ty = p.y + ady;
-                const ex = tx + 0.5 + (Math.random()-0.5)*0.2;
-                const ey = ty + 0.5 + (Math.random()-0.5)*0.2;
-                attackEffects.push({
-                    x: ex, y: ey,
-                    type: 'player', owner: 'p2', dir: p.facing, startTime: performance.now(), duration: 100
-                });
-            }
+function drawHeartsUI() {
+    const drawHeart = (hx, hy, hpVal) => {
+        ctx.fillStyle = "red";
+        for(let i=0; i<3; i++) {
+             if (hpVal > i*3) {
+                 ctx.fillRect(hx + i*10, hy, 8, 8);
+             } else {
+                 ctx.strokeStyle = "gray";
+                 ctx.strokeRect(hx + i*10, hy, 8, 8);
+             }
         }
-    } else if (gameState === 'title') {
-        if(e.key === 'Enter') {
-             if (isInputLocked) return;
-             
-             gameState='matching'; 
-             titleBGM.play().catch(()=>{});
-             setTimeout(updateInputPosition, 0);
-        }
-    }
-});
-
-window.addEventListener('keyup', (e) => {
-    keys[e.key] = false;
-});
-
-window.addEventListener('blur', () => {
-    for (let k in keys) {
-        keys[k] = false;
-    }
-});
-
-// --- Minimap rendering logic for updateMinimap ---
-function renderFloorCanvas() {
-    floorCanvas.width = DARKNESS_WIDTH;
-    floorCanvas.height = DARKNESS_HEIGHT;
+    };
     
-    // Draw current visible area to floorCanvas
-    // Re-rendering happens in drawGameScreen via drawImage(floorCanvas...)
-    // But we need to fill floorCanvas with the tile pattern first.
-    // In this optimized version, we will just draw tiles directly in drawGameScreen frame-by-frame 
-    // OR render a large canvas. Since the map is huge (100x100), we cannot render the whole map.
-    // We only render the *viewport* to the canvas if we want to cache, but scrolling invalidates cache.
-    // Actually, simply drawing tiles in the viewport is fast enough. 
-    // The previous code had `renderFloorCanvas` but it was likely empty or I missed copying it.
-    // Let's implement a simple direct draw in renderFloorCanvas to be called once per frame 
-    // OR just draw tiles in drawGameScreen.
+    ctx.fillStyle = "white";
+    ctx.font = "16px 'DotGothic16'";
+    ctx.textAlign = "left";
     
-    // Correction: In the previous code `renderFloorCanvas` was called but not defined in the snippet.
-    // I will implement it to draw the viewport tiles to `floorCanvas`.
+    // P1
+    ctx.fillText("P1", 20, 30);
+    drawHeart(50, 20, hpP1);
+
+    // P2
+    ctx.fillText("P2", 20, 50);
+    drawHeart(50, 40, hpP2);
 }
-
-// Redefine renderFloorCanvas to actually draw tiles for the current viewport
-// Wait, `floorCanvas` is used in `drawGameScreen` as a cache?
-// "if(!floorDrawn) renderFloorCanvas();" suggests it's a one-time thing, but viewport moves.
-// Actually, with a moving viewport, we should draw tiles directly.
-// I will modify drawGameScreen to draw tiles directly and ignore floorCanvas for main view
-// to avoid complexity of scrolling cache, OR implement a simple tile drawer.
-//
-// Let's go with direct drawing for simplicity and performance in this 2D context.
-// I will override drawGameScreen's floor drawing part slightly to Loop over visible tiles.
-
-// Re-writing drawGameScreen floor part inside the function above was:
-// ctx.drawImage(floorCanvas, ... )
-// I will replace that logic with a loop in the final code.
-
-// ... Wait, I should provide the `renderFloorCanvas` function or fix the logic.
-// Efficient approach: Just draw visible tiles in `drawGameScreen`.
-
-// Let's patch `renderFloorCanvas` to be a no-op and change `drawGameScreen` logic?
-// No, I'll stick to the provided structure but make `floorCanvas` render the *current viewport*.
-// Actually, `floorDrawn` flag implies static map. But the map is bigger than screen.
-// I will remove `floorCanvas` usage for the main map and just loop. It's cleaner.
-
-// Correction on previous thought: The provided code assumes `floorCanvas` contains the *whole map*?
-// 100x100 tiles * 56px (8*7) = 5600px. That's big but renderable.
-// Let's render the WHOLE map to `floorCanvas` once upon generation.
-// 5600x5600 canvas might be too heavy for some mobile devices.
-// Better: Render only visible tiles in `drawGameScreen`.
-
-// I will define `renderFloorCanvas` to render the *whole* map if possible, 
-// OR just modify `drawGameScreen` to draw tiles.
-// To be safe and performant on mobile: Draw tiles in `drawGameScreen`.
-
-// Let's define `renderFloorCanvas` to do nothing, and modify `drawGameScreen` to draw tiles.
-// I'll update `drawGameScreen` in the code block above to loop.
-
-// WAIT. I already outputted the code. 
-// I need to ensure `renderFloorCanvas` exists or `drawGameScreen` works.
-// I will add `renderFloorCanvas` implementation that renders the *whole map* (it's 100x100).
-// 100 * 56 = 5600px. 
-// 5600 * 5600 * 4 bytes ~ 125MB. It might crash mobile browsers.
-//
-// **Critical Correction**: I must implement tile-by-tile rendering in `drawGameScreen` 
-// and NOT use a giant cached canvas.
-
-// I will inject the tile drawing loop into `drawGameScreen` and remove `floorCanvas` usage for the map background.
 
 function updateMinimap() {
      if (!minimapFloorDrawn) {
@@ -2746,13 +2295,8 @@ function updateMinimap() {
      minimapCtx.fillStyle = "rgba(0,0,0,0.5)";
      minimapCtx.fillRect(0,0,200,200);
      
-     // Draw visible range centered on player
-     let cx = isHost ? player1.x : player2.x;
-     let cy = isHost ? player1.y : player2.y;
      if (isDebugMode) {
-         // Show whole map scaled
          minimapCtx.drawImage(minimapFloorCanvas, 0, 0);
-         
          minimapCtx.fillStyle = "#0f0";
          minimapCtx.fillRect(player1.x*2, player1.y*2, 4, 4);
          minimapCtx.fillStyle = "#00f";
@@ -2762,297 +2306,7 @@ function updateMinimap() {
      }
 }
 
-function initPeer(password) {
-    if (peer) return;
-    isMatching = true;
-    updateInputPosition();
-    
-    const myId = PEER_ID_PREFIX + hashCode(password); 
-    
-    peer = new Peer(null, { debug: 1 }); 
-
-    peer.on('open', (id) => {
-        tryConnectAsHost(myId);
-    });
-
-    peer.on('error', (err) => {
-        console.log("Peer Error: ", err);
-        if (err.type === 'unavailable-id') {
-            connectAsGuest(myId);
-        } else {
-            isMatching = false;
-            updateInputPosition();
-            alert("通信エラーが発生しました。合言葉を変えて試してください。");
-        }
-    });
-}
-
-function tryConnectAsHost(baseId) {
-    const hostId = baseId + "_HOST";
-    if(peer) peer.destroy();
-    
-    peer = new Peer(hostId, { debug: 1 });
-    
-    peer.on('open', (id) => {
-        isHost = true;
-        peer.on('connection', (c) => {
-            if (conn) { c.close(); return; } 
-            conn = c;
-            setupConnection();
-        });
-    });
-    
-    peer.on('error', (err) => {
-        if (err.type === 'unavailable-id') {
-            connectAsGuest(baseId);
-        }
-    });
-}
-
-function connectAsGuest(baseId) {
-    const hostId = baseId + "_HOST";
-    if(peer) peer.destroy();
-    peer = new Peer(null, {debug: 1});
-    
-    peer.on('open', () => {
-        isHost = false;
-        conn = peer.connect(hostId);
-        if(!conn) { alert("ホストが見つかりません"); isMatching=false; updateInputPosition(); return; }
-        setupConnection();
-    });
-}
-
-function setupConnection() {
-    conn.on('open', () => {
-        isConnected = true;
-        isMatching = false; 
-        updateInputPosition();
-        if (!isHost) {
-            conn.send({ type: 'NAME', name: nameEl.value });
-        }
-    });
-    
-    conn.on('data', (data) => {
-        if (isHost) {
-            if (data.type === 'MOVE') {
-                guestInputQueue.push({ type: 'MOVE', dx: data.dx, dy: data.dy });
-            } else if (data.type === 'ATTACK') {
-                guestInputQueue.push({ type: 'ATTACK' });
-            } else if (data.type === 'VOTE') {
-                guestInputQueue.push({ type: 'VOTE', kind: data.kind });
-            }
-            else if (data.type === 'NAME') {
-                otherPlayerName = data.name;
-            }
-            else if (data.type === 'SE') {
-                if (data.name === 'blip') playElectronicBlip();
-            }
-        } else {
-            if (data.type === 'SYNC') {
-                const prevGameOver = isGameOver;
-                const prevGameClear = gameCleared;
-
-                player1.x = data.p1.x; player1.y = data.p1.y; player1.facing = data.p1.f; player1.stepCount = data.p1.sc;
-                player2.x = data.p2.x; player2.y = data.p2.y; player2.facing = data.p2.f; player2.stepCount = data.p2.sc;
-                hpP1 = data.hp.p1; hpP2 = data.hp.p2;
-                daughter.x = data.d.x; daughter.y = data.d.y; daughter.rescued = data.d.r; daughter.rescuer = data.d.er;
-                
-                if (data.b) {
-                    healingBiscuit.x = data.b.x;
-                    healingBiscuit.y = data.b.y;
-                    healingBiscuit.active = data.b.a;
-                }
-                
-                if (data.p1.dd) player1.deathDir = data.p1.dd;
-                if (data.p2.dd) player2.deathDir = data.p2.dd;
-
-                if (goblins.length !== data.g.length) goblins = new Array(data.g.length).fill({});
-                data.g.forEach((gData, i) => {
-                        goblins[i] = {
-                           x: gData.x, y: gData.y, facing: gData.f, state: gData.s, hp: gData.hp, 
-                           sizeScale: gData.sc, bobOffset: gData.bo, 
-                           deathTime: gData.dt, deathAngle: gData.da, dissolveProgress: gData.dp,
-                           isCasting: gData.ic
-                        };
-                });
-                
-                voteState = data.vote; 
-                fixedTime = data.t;
-                gameCleared = data.cl;
-                isGameOver = data.go;
-                isGreyMode = data.gm;
-                isFriendlyFire = data.ff; 
-                
-                otherPlayerName = data.hn;
-
-                if (data.wo && !isWhiteoutTransitioning) {
-                    triggerWhiteout();
-                    isWhiteoutTransitioning = true;
-                } else if (!data.wo && isWhiteoutTransitioning) {
-                    resolveWhiteout();
-                }
-
-                if (data.type === 'GREY_RESET_START') {
-                    triggerWhiteout();
-                }
-
-                if (isGameOver) {
-                    timerStopped = true;
-                    const rankEl = document.getElementById('result-rank');
-                    if (rankEl.style.display === 'none') {
-                        showResult();
-                    }
-                }
-                
-                if (!prevGameClear && gameCleared) {
-                    stopCurrentBgm(); 
-                    if (!isGreyMode) { clearBGM.play().catch(()=>{}); }
-                    showResult();
-                }
-
-                if (gameCleared) {
-                    const rankEl = document.getElementById('result-rank');
-                    if (rankEl.style.display === 'none') {
-                        stopCurrentBgm();
-                        if (!isGreyMode) { clearBGM.play().catch(()=>{}); }
-                        showResult();
-                    }
-                }
-
-            } else if (data.type === 'START') {
-                startDungeonGame(false, { 
-                    seed: data.seed, 
-                    colorIdx: data.colorIdx, 
-                    normalIdx: data.normalIdx, 
-                    rageIdx: data.rageIdx,
-                    playCount: data.playCount,
-                    ff: data.ff 
-                });
-                
-            } else if (data.type === 'SPAWN_EFFECT') {
-                if (data.kind === 'goblin') {
-                        attackEffects.push({
-                           x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
-                        });
-                        const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); 
-                        playSE(SE_POOLS.goblinAttack, 0.7, 0.15, pitch);
-                } else if (data.kind === 'player') {
-                      const isMe = !isHost && data.owner === 'p2';
-                      if (!isMe) {
-                          attackEffects.push({
-                              x: data.x, y: data.y, type: 'player', owner: data.owner, dir: data.dir, startTime: performance.now(), duration: 100
-                          });
-                          playSE(data.owner==='p1'?SE_POOLS.playerAttack1:SE_POOLS.playerAttack2, 0.5, 0.05);
-                      }
-                }
-            } else if (data.type === 'PLAYER_HIT') {
-                const p = data.target === 'p1' ? player1 : player2;
-                p.hitShakeTime = performance.now();
-                playSE(data.target==='p1'?SE_POOLS.playerHit1:SE_POOLS.playerHit2, 0.9, 0.05);
-            } else if (data.type === 'GO_TITLE') {
-                location.reload();
-            } else if (data.type === 'SE') {
-                if (data.name === 'blip') playElectronicBlip();
-            } else if (data.type === 'GREY_RESET_START') {
-                triggerWhiteout();
-            }
-        }
-    });
-
-    conn.on('close', () => {
-        alert("相手との接続が切れました");
-        location.reload();
-    });
-}
-
-function handleDown(e) {
-    if (gameState === 'title') {
-    } else if (gameState === 'matching') {
-        const pos = getMousePos(e);
-        const BTN_CENTER_Y = 440 + 30;
-        if (Math.abs(pos.x - VIRTUAL_WIDTH/2) < 80 && Math.abs(pos.y - BTN_CENTER_Y) < 30) {
-            playClickSound();
-            if (isConnected) {
-                if (isHost && conn && conn.open) {
-                    startDungeonGame(false);
-                }
-            } else if (isMatching) {
-                isMatching = false; 
-                if(peer) peer.destroy(); peer = null; conn = null;
-                updateInputPosition();
-            } else {
-                initPeer(passEl.value);
-            }
-        }
-        const FF_BTN_CENTER_Y = VIRTUAL_HEIGHT - 80 + 20;
-        if (!isConnected && Math.abs(pos.x - 120) < 70 && Math.abs(pos.y - FF_BTN_CENTER_Y) < 20) {
-            isFriendlyFire = !isFriendlyFire;
-            safeSetItem('goblinsNest_isFF', isFriendlyFire);
-            playClickSound();
-            updateInputPosition();
-        }
-        const DEBUG_BTN_CENTER_Y = VIRTUAL_HEIGHT - 80 + 20;
-        if (!isConnected && Math.abs(pos.x - (VIRTUAL_WIDTH - 100)) < 50 && Math.abs(pos.y - DEBUG_BTN_CENTER_Y) < 20) {
-            startDungeonGame(true);
-        }
-        
-    } else if (gameState === 'game') {
-        const pos = getMousePos(e);
-        if (pos.y < 60 && pos.x > UI_X) {
-            if (pos.y < 30 + BAR_H) isDraggingBGM = true;
-            else if (pos.y < 30 + BAR_H*2 + 15) isDraggingSE = true;
-            else if (pos.y < 30 + BAR_H*3 + 30) { isDraggingBright = true; updateBrightnessFilter(); }
-            saveVolume();
-            return;
-        }
-
-        if (isGameOver || gameCleared) {
-            const RESTART_X = 200, RESTART_Y = VIRTUAL_HEIGHT - 60;
-            const RETURN_X = VIRTUAL_WIDTH - 200, RETURN_Y = VIRTUAL_HEIGHT - 60;
-            
-            if (Math.abs(pos.x - RESTART_X) < 80 && Math.abs(pos.y - RESTART_Y) < 30) {
-                if (isHost || isDebugMode) voteState.p1 = (voteState.p1 === 'restart') ? null : 'restart';
-                else if (conn && conn.open) conn.send({type: 'VOTE', kind: 'RESTART'});
-                playClickSound();
-            }
-            if (Math.abs(pos.x - RETURN_X) < 80 && Math.abs(pos.y - RETURN_Y) < 30) {
-                if (isHost || isDebugMode) voteState.p1 = (voteState.p1 === 'return') ? null : 'return';
-                else if (conn && conn.open) conn.send({type: 'VOTE', kind: 'RETURN'});
-                playClickSound();
-            }
-        } else if (!isDebugMode) {
-            // Retreat Button
-            const RETREAT_X = 120, RETREAT_Y = VIRTUAL_HEIGHT - 50;
-            if (Math.abs(pos.x - RETREAT_X) < 60 && Math.abs(pos.y - RETREAT_Y) < 25) {
-                if (isHost) {
-                    voteState.p1 = (voteState.p1 === 'retreat') ? null : 'retreat';
-                    if (voteState.p1 === 'retreat') playChurchBell();
-                } else if (conn && conn.open) {
-                    conn.send({type: 'VOTE', kind: 'RETREAT'});
-                    playClickSound(); 
-                }
-            }
-        }
-    }
-}
-
-// Draw tiles directly loop patch for missing renderFloorCanvas logic
-// Overwriting the drawImage(floorCanvas) line in drawGameScreen is not enough since I can't edit previous blocks easily in output.
-// So I will fix it by making renderFloorCanvas actually fill the floorCanvas.
-function renderFloorCanvas() {
-    // To avoid massive canvas (125MB), we will only render the visible tiles 
-    // by hijacking the context in drawGameScreen.
-    // BUT since I am writing the final code block, I will just redefine drawGameScreen correctly here 
-    // and overwrite the previous definition? No, JS doesn't work like that easily in one file unless I put this at the bottom.
-    //
-    // Actually, I can just implement renderFloorCanvas to do nothing, 
-    // and add the drawing loop to drawGameScreen.
-    //
-    // I will redefine drawGameScreen below to be safe.
-}
-
-// Redefine drawGameScreen to handle tile drawing without giant canvas
-drawGameScreen = function() {
+function drawGameScreen() {
     ctx.fillStyle = "#111"; ctx.fillRect(0,0,VIRTUAL_WIDTH,VIRTUAL_HEIGHT);
     
     const now = performance.now();
@@ -3069,9 +2323,15 @@ drawGameScreen = function() {
 
     ctx.save();
     ctx.translate(GAME_OFFSET_X, GAME_OFFSET_Y);
+    
+    // Clipping Region to Fix Edge Bleeding
+    ctx.beginPath();
+    ctx.rect(0, 0, DARKNESS_WIDTH, DARKNESS_HEIGHT);
+    ctx.clip();
+
     ctx.imageSmoothingEnabled = false;
     
-    // Draw Floor Tiles Directly
+    // Draw Floor
     for(let y = Math.floor(vy); y < vy + VIEW_TILES_Y + 1; y++) {
         for(let x = Math.floor(vx); x < vx + VIEW_TILES_X + 1; x++) {
             if (y >= 0 && y < GRID_H && x >= 0 && x < GRID_W) {
@@ -3079,24 +2339,20 @@ drawGameScreen = function() {
                     const dx = (x - vx) * SCALED_TILE;
                     const dy = (y - vy) * SCALED_TILE;
                     
-                    // Simple tile drawing
-                    ctx.fillStyle = isGreyMode ? "#444" : currentStageColor;
-                    ctx.fillRect(Math.floor(dx), Math.floor(dy), SCALED_TILE, SCALED_TILE);
-                    
-                    // Add some texture/variant
-                    if (!isGreyMode) {
-                        ctx.fillStyle = "rgba(0,0,0,0.1)";
-                        if (floorVariant[y][x] % 3 === 0) ctx.fillRect(Math.floor(dx), Math.floor(dy), SCALED_TILE, SCALED_TILE);
-                    } else {
-                         if (floorVariant[y][x] % 5 === 0) {
+                    if (isGreyMode) {
+                        ctx.fillStyle = "#444";
+                        ctx.fillRect(Math.floor(dx), Math.floor(dy), SCALED_TILE, SCALED_TILE);
+                        if (floorVariant[y][x] % 5 === 0) {
                               ctx.drawImage(greySpaceFloorImg, Math.floor(dx), Math.floor(dy), SCALED_TILE, SCALED_TILE);
-                         }
+                        }
+                    } else {
+                        ctx.fillStyle = currentStageColor;
+                        ctx.fillRect(Math.floor(dx), Math.floor(dy), SCALED_TILE, SCALED_TILE);
+                        
+                        ctx.globalCompositeOperation = 'multiply';
+                        ctx.drawImage(floorTileImg, Math.floor(dx), Math.floor(dy), SCALED_TILE, SCALED_TILE);
+                        ctx.globalCompositeOperation = 'source-over';
                     }
-                    
-                    // Draw grid lines for retro feel
-                    ctx.strokeStyle = "rgba(0,0,0,0.2)";
-                    ctx.lineWidth = 1;
-                    ctx.strokeRect(Math.floor(dx), Math.floor(dy), SCALED_TILE, SCALED_TILE);
                 }
             }
         }
@@ -3129,9 +2385,6 @@ drawGameScreen = function() {
         drawSprite(biscuitImg, healingBiscuit.x, healingBiscuit.y, 0.2, 0.2, 0, "drop-shadow(0 0 4px #ffff00)");
     }
 
-    // ... (Rest of sprite drawing logic same as before) ...
-    // To save space and ensure correctness, I'll copy the sprite drawing logic exactly.
-    
     if (isGreyMode && greyCircleImg.complete) {
         psychicArrays.forEach(a => {
             const t = now - a.startTime;
@@ -3284,8 +2537,232 @@ drawGameScreen = function() {
         }
         ctx.restore();
     });
+
+    drawAnalogClock();
+    if (isDebugMode) {
+         ctx.drawImage(minimapCanvas, VIRTUAL_WIDTH - 190, VIRTUAL_HEIGHT - 190);
+    }
+    drawHeartsUI();
+
     ctx.restore(); 
 }
+
+function getMousePos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+
+    return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+    };
+}
+
+const saveVolume = () => {
+    if (isDraggingBGM || isDraggingSE || isDraggingBright) {
+        safeSetItem('goblinsNest_bgmVol', bgmVolume);
+        safeSetItem('goblinsNest_seVol', seVolume);
+        safeSetItem('goblinsNest_bright', brightnessLevel);
+    }
+    isDraggingBGM = isDraggingSE = isDraggingBright = false;
+}; 
+
+canvas.addEventListener('mousedown', handleDown);
+window.addEventListener('mousemove', (e) => {
+    if (!isDraggingBGM && !isDraggingSE && !isDraggingBright) return;
+    const pos = getMousePos(e);
+    let vol = Math.max(0, Math.min(1, (pos.x - UI_X) / BAR_W));
+    
+    if (isDraggingBGM) bgmVolume = vol;
+    if (isDraggingSE) seVolume = vol;
+    if (isDraggingBright) {
+        brightnessLevel = vol;
+        updateBrightnessFilter();
+    }
+});
+window.addEventListener('mouseup', saveVolume);
+canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleDown(e); }, {passive:false});
+window.addEventListener('touchend', saveVolume);
+
+function handleDown(e) {
+    const pos = getMousePos(e);
+
+    if (gameState === 'title') {
+    } else if (gameState === 'matching') {
+        const BTN_CENTER_Y = 440 + 30;
+        if (Math.abs(pos.x - VIRTUAL_WIDTH/2) < 80 && Math.abs(pos.y - BTN_CENTER_Y) < 30) {
+            playClickSound();
+            if (isConnected) {
+                if (isHost && conn && conn.open) {
+                    startDungeonGame(false);
+                }
+            } else if (isMatching) {
+                isMatching = false; 
+                if(peer) peer.destroy(); peer = null; conn = null;
+                updateInputPosition();
+            } else {
+                initPeer(passEl.value);
+            }
+        }
+        const FF_BTN_CENTER_Y = VIRTUAL_HEIGHT - 80 + 20;
+        if (!isConnected && Math.abs(pos.x - 120) < 70 && Math.abs(pos.y - FF_BTN_CENTER_Y) < 20) {
+            isFriendlyFire = !isFriendlyFire;
+            safeSetItem('goblinsNest_isFF', isFriendlyFire);
+            playClickSound();
+            updateInputPosition();
+        }
+        const DEBUG_BTN_CENTER_Y = VIRTUAL_HEIGHT - 80 + 20;
+        if (!isConnected && Math.abs(pos.x - (VIRTUAL_WIDTH - 100)) < 50 && Math.abs(pos.y - DEBUG_BTN_CENTER_Y) < 20) {
+            startDungeonGame(true);
+        }
+        
+    } else if (gameState === 'game') {
+        if (pos.y < 60 && pos.x > UI_X) {
+            if (pos.y < 30 + BAR_H) isDraggingBGM = true;
+            else if (pos.y < 30 + BAR_H*2 + 15) isDraggingSE = true;
+            else if (pos.y < 30 + BAR_H*3 + 30) { isDraggingBright = true; updateBrightnessFilter(); }
+            // Do NOT call saveVolume() here as it resets flags immediately
+            return;
+        }
+
+        if (isGameOver || gameCleared) {
+            const RESTART_X = 200, RESTART_Y = VIRTUAL_HEIGHT - 60;
+            const RETURN_X = VIRTUAL_WIDTH - 200, RETURN_Y = VIRTUAL_HEIGHT - 60;
+            
+            if (Math.abs(pos.x - RESTART_X) < 80 && Math.abs(pos.y - RESTART_Y) < 30) {
+                if (isHost || isDebugMode) voteState.p1 = (voteState.p1 === 'restart') ? null : 'restart';
+                else if (conn && conn.open) conn.send({type: 'VOTE', kind: 'RESTART'});
+                playClickSound();
+            }
+            if (Math.abs(pos.x - RETURN_X) < 80 && Math.abs(pos.y - RETURN_Y) < 30) {
+                if (isHost || isDebugMode) voteState.p1 = (voteState.p1 === 'return') ? null : 'return';
+                else if (conn && conn.open) conn.send({type: 'VOTE', kind: 'RETURN'});
+                playClickSound();
+            }
+        } else if (!isDebugMode) {
+            const RETREAT_X = 120, RETREAT_Y = VIRTUAL_HEIGHT - 50;
+            if (Math.abs(pos.x - RETREAT_X) < 60 && Math.abs(pos.y - RETREAT_Y) < 25) {
+                if (isHost) {
+                    voteState.p1 = (voteState.p1 === 'retreat') ? null : 'retreat';
+                    if (voteState.p1 === 'retreat') playChurchBell();
+                } else if (conn && conn.open) {
+                    conn.send({type: 'VOTE', kind: 'RETREAT'});
+                    playClickSound(); 
+                }
+            }
+        }
+    }
+}
+
+// [FIX] New Input Handler called from update()
+function handleInput() {
+    if (gameState !== 'game') return;
+    const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
+    const now = performance.now();
+
+    if (isHost || isDebugMode) {
+        if (!isDebugMode && !isGreyMode && (effectiveGameOver || gameCleared)) return;
+
+        let dx = 0, dy = 0;
+        if (keys['ArrowUp']) dy = -1;
+        else if (keys['ArrowDown']) dy = 1;
+        else if (keys['ArrowLeft']) dx = -1;
+        else if (keys['ArrowRight']) dx = 1;
+        
+        if ((dx !== 0 || dy !== 0) && now - player1.lastMoveTime >= MOVE_COOLDOWN) {
+             movePlayer(player1, dx, dy);
+        }
+        
+        if (keys['z'] || keys['Z']) {
+             playerAttack(player1);
+        }
+
+        if (isDebugMode) {
+            let d2x = 0, d2y = 0;
+            if (keys['w'] || keys['W']) d2y = -1;
+            else if (keys['s'] || keys['S']) d2y = 1;
+            else if (keys['a'] || keys['A']) d2x = -1;
+            else if (keys['d'] || keys['D']) d2x = 1;
+            
+            if ((d2x !== 0 || d2y !== 0) && now - player2.lastMoveTime >= MOVE_COOLDOWN) {
+                 movePlayer(player2, d2x, d2y);
+            }
+            if (keys['x'] || keys['X']) playerAttack(player2);
+        }
+        
+        if (isDebugMode && (keys['r'] || keys['R'])) {
+             if (!keys['r_lock']) {
+                 startDungeonGame(true, null);
+                 keys['r_lock'] = true;
+                 setTimeout(() => keys['r_lock'] = false, 500);
+             }
+        }
+    } else {
+        if (effectiveGameOver || gameCleared) return; 
+
+        let dx = 0, dy = 0;
+        if (keys['ArrowUp']) dy = -1;
+        else if (keys['ArrowDown']) dy = 1;
+        else if (keys['ArrowLeft']) dx = -1;
+        else if (keys['ArrowRight']) dx = 1;
+
+        if (dx !== 0 || dy !== 0) {
+            if (now - player2.lastMoveTime >= MOVE_COOLDOWN) {
+                if (conn && conn.open) conn.send({ type: 'MOVE', dx: dx, dy: dy });
+                player2.lastMoveTime = now;
+            }
+        }
+        if (keys['z'] || keys['Z']) {
+            if (conn && conn.open) conn.send({ type: 'ATTACK' });
+            playSE(SE_POOLS.playerAttack2, 0.5, 0.05);
+            const p = player2;
+            const [adx, ady] = DIRS[p.facing];
+            const tx = p.x + adx, ty = p.y + ady;
+            const ex = tx + 0.5 + (Math.random()-0.5)*0.2;
+            const ey = ty + 0.5 + (Math.random()-0.5)*0.2;
+            attackEffects.push({
+                x: ex, y: ey,
+                type: 'player', owner: 'p2', dir: p.facing, startTime: performance.now(), duration: 100
+            });
+            keys['z'] = false; 
+        }
+    }
+}
+
+nameEl.addEventListener('input', (e) => {
+    if (e.isComposing) return;
+    safeSetItem('goblinsNest_name', nameEl.value);
+});
+passEl.addEventListener('input', (e) => {
+    if (e.isComposing) return;
+    passEl.value = passEl.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)).replace(/[^a-zA-Z0-9]/g, '');
+    safeSetItem('goblinsNest_pass', passEl.value);
+});
+
+const keys = {};
+window.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    keys[e.key] = true;
+    if (gameState === 'title' && e.key === 'Enter') {
+         if (isInputLocked) return;
+         gameState='matching'; 
+         titleBGM.play().catch(()=>{});
+         setTimeout(updateInputPosition, 0);
+    }
+});
+
+window.addEventListener('keyup', (e) => {
+    keys[e.key] = false;
+});
+
+window.addEventListener('blur', () => {
+    for (let k in keys) {
+        keys[k] = false;
+    }
+});
 
 update();
 </script>
