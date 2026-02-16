@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.9 Rev.5</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.9 Rev.2</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -90,12 +90,10 @@
         #controls-help {
             margin-top: 10px; color: #aaa; font-size: 14px; text-align: center; width: 1024px;
         }
-        
-        /* フラッシュ演出レイヤー */
-        #flash-layer {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none; z-index: 200; opacity: 0;
-            transition: opacity 2.5s ease-in-out;
+        #abducted-msg {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #0f0; font-size: 80px; text-shadow: 0 0 20px #0f0; display: none; z-index: 50;
+            pointer-events: none; letter-spacing: 10px;
         }
     </style>
 </head>
@@ -109,7 +107,6 @@
         </div>
 
         <canvas id="gameCanvas"></canvas>
-        <div id="flash-layer"></div>
         
         <textarea id="nameInput" class="game-input-area" maxlength="100"></textarea>
         <input type="text" id="passInput" class="game-input-line" maxlength="6">
@@ -117,6 +114,7 @@
         <div id="ui-layer">
             <div id="info-panel"></div>
             <div id="signal-message"></div>
+            <div id="abducted-msg">ABDUCTED...</div>
             <div id="result-rank">
                 <div id="guild-comment"></div>
                 <div id="rank-grade" style="font-size: 60px; color: #ff0; margin: 10px 0;"></div>
@@ -193,7 +191,7 @@ const uiLayer = document.getElementById('ui-layer');
 const infoPanel = document.getElementById('info-panel');
 const signalMsgEl = document.getElementById('signal-message');
 const controlsHelpEl = document.getElementById('controls-help');
-const flashEl = document.getElementById('flash-layer');
+const abductedMsgEl = document.getElementById('abducted-msg');
 
 const gateScreen = document.getElementById('gate-screen');
 const gatePassInput = document.getElementById('gate-pass');
@@ -249,10 +247,9 @@ let otherPlayerName = "";
 
 let isGreyMode = false;
 let isDebugMode = false; 
-let isGreyDebug = false; // ★演出確認用グレイデバッグフラグ
 let psychicArrays = []; 
 let currentBgmDebugName = ""; 
-let isWarpSequence = false; // ワープ演出進行中
+let isAbductedSequence = false;
 
 const BAR_W = 80, BAR_H = 15;
 const UI_X = VIRTUAL_WIDTH - (BAR_W + 20), UI_Y_START = 30;
@@ -352,7 +349,7 @@ let currentStageColor = null;
 let currentStageBgm = { normal: null, rage: null };
 let debugCurrentNormalIdx = -1;
 let debugCurrentRageIdx = -1;
-let lastStageData = null; 
+let lastStageData = null; // 再起用に前回の生成パラメータを保存
 
 let currentAudio = null;
 let fadeInterval = null; 
@@ -436,11 +433,11 @@ let retreatState = {
     confirmed: false
 };
 
-// リザルト画面アクション用ステート
+// リザルト画面アクション用ステート (Left=再起/続行, Right=帰還)
 let resultState = {
     left: { active: false, proposer: null },
     right: { active: false, proposer: null },
-    confirmedAction: null
+    confirmedAction: null // 'retry', 'continue', 'return'
 };
 
 if (safeGetItem('goblinsNest_gatePassed')) {
@@ -485,33 +482,6 @@ function updateBrightnessFilter() {
     }
 } 
 
-function triggerWarpSequence() {
-    if (isWarpSequence) return;
-    isWarpSequence = true;
-    
-    // Step 1: 蛍光黄色 (即時)
-    flashEl.style.transition = 'none';
-    flashEl.style.backgroundColor = '#ccff00'; // Fluorescent Yellow
-    flashEl.style.opacity = 1;
-    
-    stopCurrentBgm(); // 音を消す
-
-    // Step 2: 黒へ (0.2秒後)
-    setTimeout(() => {
-        flashEl.style.transition = 'none'; // パッと切り替える
-        flashEl.style.backgroundColor = '#000000';
-    }, 200);
-
-    // Step 3: 次のステージへ (2.0秒後)
-    // ホストまたはデバッグモードなら実行
-    if (isHost || isDebugMode) {
-        setTimeout(() => {
-            // グレイデバッグ中なら次もグレイデバッグでループ
-            startDungeonGame(isDebugMode, null, false, isGreyDebug); 
-        }, 2000);
-    }
-}
-
 function update() {
     if (gameState === 'gate') {
         requestAnimationFrame(update);
@@ -528,7 +498,7 @@ function update() {
     
     if(greyBGM) {
         let greyVolFactor = 0.0;
-        if (isGreyMode && gameState === 'game' && !gameCleared && !isGameOver && !isWarpSequence) {
+        if (isGreyMode && gameState === 'game' && !gameCleared && !isGameOver && !isAbductedSequence) {
             let minDist = Infinity;
             goblins.forEach(g => {
                 if (g.hp > 0) {
@@ -545,12 +515,10 @@ function update() {
                 greyVolFactor = 1.0 - (minDist - CLOSE_DIST) / (FAR_DIST - CLOSE_DIST);
             }
         }
-        // ワープ中は音を消す
-        if (isWarpSequence) greyVolFactor = 0.0;
-        
         greyBGM.volume = 0.4 * realBGMVol * 2.5 * greyVolFactor;
     }
 
+    // 古いシグナルメッセージの自動消去（リザルト画面以外で使用）
     if (!isGameOver && !gameCleared && signalState.active && !signalState.agreedTime && performance.now() - signalState.startTime > 3000) {
         signalState.active = false;
         signalState.p1 = false;
@@ -569,12 +537,17 @@ function update() {
              updateInfoText();
         }
 
-        // 死亡判定 (Game Over or Warp)
-        // グレイデバッグ中は「無敵ではない」ためここでチェックする
-        if ((!isDebugMode || isGreyDebug) && (hpP1 <= 0 || hpP2 <= 0)) {
-            if (isGreyMode && !isWarpSequence) {
-                 // グレイモード死亡: ワープ演出開始
-                 triggerWarpSequence();
+        // 死亡判定 (Game Over or Abduction)
+        // updateループ内での遷移チェック。damagePlayer内でも呼ぶが、念のためここでもチェック。
+        if (!isDebugMode && (hpP1 <= 0 || hpP2 <= 0)) {
+            if (isGreyMode && !isAbductedSequence) {
+                 // グレイモード死亡: 連れ去り演出 -> 次へ
+                 isAbductedSequence = true;
+                 abductedMsgEl.style.display = 'block';
+                 stopCurrentBgm();
+                 setTimeout(() => {
+                     if(isHost) startDungeonGame(false, null, false); // Continue (Next Seed)
+                 }, 2000);
             } else if (!isGreyMode && !isGameOver) {
                  // 通常死亡: ゲームオーバー画面
                  isGameOver = true;
@@ -583,12 +556,7 @@ function update() {
             }
         }
 
-        if (isDebugMode) {
-            // デバッグモード(予演/ソロ)なら直接ループ実行
-            // ホスト処理と同じように入力キュー消化も不要（ローカル入力のみ）
-            gameLoopStep();
-        } else {
-            // オンラインマルチ (Host/Guest)
+        if (!isDebugMode) { 
             if (isHost) {
                 // ホスト側：入力キュー消化
                 let processed = 0;
@@ -602,6 +570,11 @@ function update() {
                     processed++;
                 }
                 
+                // リザルトアクションの実行 (確定後2秒で実行)
+                if (resultState.confirmedAction) {
+                     // 実行待ちロジックは handleResultAction 内の setTimeout で処理されるため、ここでは何もしない
+                }
+
                 gameLoopStep(); 
 
                 if (conn && conn.open) {
@@ -627,7 +600,7 @@ function update() {
                             cl: gameCleared,
                             go: isGameOver,
                             gm: isGreyMode,
-                            wp: isWarpSequence, // ワープ演出同期
+                            ab: isAbductedSequence, // 連れ去り演出同期
                             hn: nameEl.value,
                             ff: isFriendlyFire
                         };
@@ -635,9 +608,9 @@ function update() {
                         lastSyncTime = now;
                     }
                 }
-            } else {
-                // ゲスト側はgameLoopStepを行わず同期データで描画のみ
             }
+        } else {
+            gameLoopStep();
         }
     }
 
@@ -819,12 +792,6 @@ function drawMatchingScreen() {
         ctx.lineWidth = 2;
         ctx.strokeRect(VIRTUAL_WIDTH - 150, VIRTUAL_HEIGHT - 80, 100, 40);
         ctx.font = "20px 'DotGothic16'"; ctx.fillText("予演", VIRTUAL_WIDTH - 100, DEBUG_BTN_CENTER_Y + TEXT_OFFSET_Y); 
-        
-        // ★グレイボタン (予演の上)
-        ctx.strokeStyle = "#ffff00";
-        ctx.strokeRect(VIRTUAL_WIDTH - 150, VIRTUAL_HEIGHT - 140, 100, 40);
-        ctx.fillStyle = "#ffff00";
-        ctx.font = "20px 'DotGothic16'"; ctx.fillText("グレイ", VIRTUAL_WIDTH - 100, DEBUG_BTN_CENTER_Y - 60 + TEXT_OFFSET_Y); 
         
         // FF設定ボタン（左下）
         ctx.lineWidth = 2;
@@ -1160,13 +1127,8 @@ function calculateShortestPath() {
     return distanceToDaughter * 1.5; 
 } 
 
-// forceGrey: グレイモード強制フラグ(デバッグボタン用)
-function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null, isRetry = false, forceGrey = false) {
+function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null, isRetry = false) {
     isDebugMode = debugFlag; 
-    if (forceGrey) isGreyDebug = true; // デバッグボタンが押されたらフラグON
-    // リトライでない新規なら、もしボタン経由でなければフラグOFF(通常プレイ)
-    else if (!isRetry) isGreyDebug = false;
-
     guestInputQueue = []; 
 
     const prefix = isDebugMode ? S_KEY_PREFIX_DEBUG : S_KEY_PREFIX_REAL;
@@ -1185,12 +1147,15 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null, isRe
         
     } else {
         if (isRetry && lastStageData) {
+            // 再起: 前回のデータをそのまま使用
             seedVal = lastStageData.seed;
             selectedColorIdx = lastStageData.colorIdx;
             selectedNormalIdx = lastStageData.normalIdx;
             selectedRageIdx = lastStageData.rageIdx;
-            playCount = lastStageData.playCount; 
+            playCount = lastStageData.playCount; // PlayCountは戻さないが、進めもしない
+            // Xorshiftの状態を戻すためにインスタンス再生成は下で行う
         } else {
+            // 新規: デッキ進行
             initDecks(prefix);
             
             if (currentDeckIndex >= 56) {
@@ -1209,6 +1174,7 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null, isRe
         }
     }
     
+    // 次回の再起用に保存
     lastStageData = {
         seed: seedVal,
         colorIdx: selectedColorIdx,
@@ -1225,12 +1191,7 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null, isRe
     debugCurrentNormalIdx = selectedNormalIdx;
     debugCurrentRageIdx = selectedRageIdx;
 
-    // グレイデバッグ中は強制的にTrue、それ以外は確率
-    if (isGreyDebug) {
-        isGreyMode = true;
-    } else {
-        isGreyMode = (playCount >= 2 && rnd.nextFloat() < 0.01); 
-    }
+    isGreyMode = (playCount >= 2 && rnd.nextFloat() < 0.01); 
 
     if (isGreyMode) {
         canvas.classList.add('grey-mode-canvas');
@@ -1244,6 +1205,7 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null, isRe
     clearBGM.pause(); clearBGM.currentTime = 0;
     uiLayer.style.display = 'block';
     nameEl.style.display = 'none'; passEl.style.display = 'none';
+    abductedMsgEl.style.display = 'none';
     
     if (isDebugMode) {
         infoPanel.style.display = 'block';
@@ -1257,18 +1219,7 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null, isRe
     signalMsgEl.style.opacity = 0;
     retreatState = { active: false, proposer: null, confirmed: false };
     resultState = { left: { active: false, proposer: null }, right: { active: false, proposer: null }, confirmedAction: null };
-    
-    // ワープ演出初期化 (白からフェードイン)
-    isWarpSequence = false;
-    flashEl.style.transition = 'none';
-    flashEl.style.backgroundColor = '#ffffff'; 
-    flashEl.style.opacity = 1;
-    
-    // 0.1秒後に透明へフェード
-    setTimeout(() => {
-        flashEl.style.transition = 'opacity 2.0s ease-out';
-        flashEl.style.opacity = 0;
-    }, 100);
+    isAbductedSequence = false;
 
     if (!isDebugMode && isHost && conn && conn.open) {
         conn.send({ 
@@ -1612,7 +1563,7 @@ function gameLoopStep() {
                 [player1, player2].forEach(p => {
                     if (Math.abs(p.x - a.x) <= 1 && Math.abs(p.y - a.y) <= 1) {
                         hpP1 = 0; hpP2 = 0; 
-                        if ((!isDebugMode || isGreyDebug) && !isGameOver && !gameCleared && !isWarpSequence) {
+                        if (!isDebugMode && !isGameOver && !gameCleared && !isAbductedSequence) {
                             damagePlayer(p, 100); 
                         }
                     }
@@ -2060,12 +2011,12 @@ function damagePlayer(p, amount) {
         });
     }
 
+    // 死亡判定は update() で一括管理するためここではフラグ操作のみ
+    // ただし、即座に演出が必要な場合はここでトリガー
     if (hpP1 <= 0 || hpP2 <= 0) {
-        if ((!isDebugMode || isGreyDebug) && !isGameOver && !gameCleared && !isWarpSequence) {
-             // グレイモード死亡: ワープ演出トリガー
-             if (isGreyMode) {
-                 triggerWarpSequence();
-             } else {
+        if (!isDebugMode && !isGameOver && !gameCleared && !isAbductedSequence) {
+             // グレイモードチェックは update() に任せるか、ここで行う
+             if (!isGreyMode) {
                  isGameOver = true; timerStopped = true;
                  player1.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
                  player2.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
@@ -2077,7 +2028,7 @@ function damagePlayer(p, amount) {
 
 function movePlayer(p, dx, dy) {
     if (!isDebugMode && (isGameOver || gameCleared)) return;
-    if (isWarpSequence) return;
+    if (isAbductedSequence) return;
 
     if (dx === 0 && dy === -1) p.facing = 0;
     if (dx === 1 && dy === 0) p.facing = 1;
@@ -2114,7 +2065,7 @@ function movePlayer(p, dx, dy) {
 function playerAttack(p) {
     if (!isDebugMode && daughter.rescued && daughter.rescuer === (p === player1 ? 'p1' : 'p2')) return;
     if (!isDebugMode && (isGameOver || gameCleared)) return;
-    if (isWarpSequence) return;
+    if (isAbductedSequence) return;
 
     const now = performance.now();
     const lastAtk = p === player1 ? lastAttackTimeP1 : lastAttackTimeP2;
@@ -2603,12 +2554,12 @@ function drawHeartsUI() {
 
     // 撤退ボタンの描画 (ゲームオーバー/クリア時以外、デバッグモード時以外)
     const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
-    if (!effectiveGameOver && !gameCleared && !isDebugMode && !isWarpSequence) {
+    if (!effectiveGameOver && !gameCleared && !isDebugMode && !isAbductedSequence) {
         drawRetreatButton();
     }
     
     // リザルト画面アクションボタン (ゲームオーバー/クリア時)
-    if ((isGameOver || gameCleared) && !isDebugMode && !isWarpSequence) {
+    if ((isGameOver || gameCleared) && !isDebugMode && !isAbductedSequence) {
         drawResultButtons();
     }
 } 
@@ -2780,13 +2731,6 @@ function handleDown(e) {
         if (!isMatching && !isConnected && pos.x > VIRTUAL_WIDTH - 150 && pos.x < VIRTUAL_WIDTH - 50 && pos.y > VIRTUAL_HEIGHT - 80) {
             startDungeonGame(true); 
         }
-        
-        // ★グレイボタン (デバッグ用)
-        if (!isMatching && !isConnected && pos.x > VIRTUAL_WIDTH - 150 && pos.x < VIRTUAL_WIDTH - 50 && pos.y > VIRTUAL_HEIGHT - 140 && pos.y < VIRTUAL_HEIGHT - 100) {
-            // isDebugMode=true かつ forceGrey=true で開始
-            startDungeonGame(true, null, false, true);
-        }
-
         if (!isMatching && !isConnected && pos.x > 50 && pos.x < 190 && pos.y > VIRTUAL_HEIGHT - 80) {
             isFriendlyFire = !isFriendlyFire;
             safeSetItem('goblinsNest_isFF', isFriendlyFire);
@@ -2796,7 +2740,7 @@ function handleDown(e) {
     // Game
     else if (gameState === 'game') {
         // リザルト画面アクション
-        if ((isGameOver || gameCleared) && !isDebugMode && !isWarpSequence) {
+        if ((isGameOver || gameCleared) && !isDebugMode && !isAbductedSequence) {
             handleResultInput(pos);
             return;
         }
@@ -2804,7 +2748,7 @@ function handleDown(e) {
         const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
         
         // 撤退ボタン (プレイ中)
-        if (!effectiveGameOver && !gameCleared && !isDebugMode && !isWarpSequence) {
+        if (!effectiveGameOver && !gameCleared && !isDebugMode) {
              const btnX = 40; const btnY = VIRTUAL_HEIGHT - 80;
              const btnW = 140; const btnH = 40;
              
@@ -2988,7 +2932,7 @@ window.addEventListener('keydown', (e) => {
         }
 
         if (isHost || isDebugMode) {
-            if (!isDebugMode && (effectiveGameOver || gameCleared || isWarpSequence)) return; 
+            if (!isDebugMode && (effectiveGameOver || gameCleared || isAbductedSequence)) return; 
 
             let dx = 0, dy = 0;
             if (keys['ArrowUp']) dy = -1;
@@ -3009,7 +2953,7 @@ window.addEventListener('keydown', (e) => {
                 if (keys['x'] || keys['X']) playerAttack(player2);
             }
         } else {
-            if (effectiveGameOver || gameCleared || isWarpSequence) return; 
+            if (effectiveGameOver || gameCleared || isAbductedSequence) return; 
 
             let dx = 0, dy = 0;
             if (keys['ArrowUp']) dy = -1;
@@ -3180,32 +3124,21 @@ function setupConnection() {
                 
                 signalState = data.sig;
                 retreatState = data.ret;
-                resultState = data.res; 
+                resultState = data.res; // リザルト同期
 
                 fixedTime = data.t;
                 gameCleared = data.cl;
                 isGameOver = data.go;
                 isGreyMode = data.gm;
-                isWarpSequence = data.wp; // ワープ演出同期
+                isAbductedSequence = data.ab; // 連れ去り演出同期
                 isFriendlyFire = data.ff;
                 
                 otherPlayerName = data.hn;
                 
-                if (isWarpSequence) {
-                    // クライアント側アニメーション開始は Sync の wp フラグで制御
-                    // 単純化のため、wp=trueを受信したら不透明度1にする (ホスト主導で切り替わるため)
-                    flashEl.style.transition = 'opacity 0.2s';
-                    // ただし、黄色にする情報はここにはないので、簡易的に「真っ白」か「真っ黒」にするか、
-                    // またはホストのタイミングに合わせて色を変えるのは難しい。
-                    // P2Pのラグを考慮し、ゲスト側は「白フェードアウト(覚醒)」だけ綺麗に見えれば良いという割り切りが安全。
-                    // もしゲスト側でも「黄色→黒」を見たければ、専用のパケット(WARP_STARTなど)が必要だが、
-                    // 既存コードを大きく変えない方針のため、SYNCで賄う。
-                    // ここでは「wpフラグが立っている間は画面を暗転させる」処理とする。
-                    flashEl.style.backgroundColor = '#000';
-                    flashEl.style.opacity = 1;
+                if (isAbductedSequence) {
+                    abductedMsgEl.style.display = 'block';
                 } else {
-                    // wp=false になったら(次のステージ開始)、白フェードイン演出
-                    // これは startDungeonGame(SYNC受信) で処理される
+                    abductedMsgEl.style.display = 'none';
                 }
 
                 updateInputPosition();
