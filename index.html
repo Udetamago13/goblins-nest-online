@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.9 Rev.2</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.9 Rev.3</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -593,9 +593,7 @@ function update() {
                                 dt: g.deathTime, da: g.deathAngle, dp: g.dissolveProgress,
                                 ic: g.isCasting
                             })),
-                            sig: signalState, 
-                            ret: retreatState,
-                            res: resultState, // リザルト状態同期
+                            // sig, ret, res はSYNCから除外 (イベント駆動で管理)
                             t: (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime,
                             cl: gameCleared,
                             go: isGameOver,
@@ -1227,7 +1225,7 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null, isRe
             seed: seedVal, 
             colorIdx: selectedColorIdx, 
             normalIdx: selectedNormalIdx, 
-            rageIdx: selectedRageIdx,
+            rageIdx: selectedRageIdx, 
             playCount: playCount 
         });
     }
@@ -1586,7 +1584,7 @@ function updateGoblin(g, now) {
     if (g.state === STATE.DYING) {
         const elapsed = now - g.deathTime;
         const FADE_START_DELAY = 1500; 
-        const FADE_DURATION = 1000;         
+        const FADE_DURATION = 1000;          
 
         if (elapsed < 500) {
             g.deathAngle = (elapsed / 500) * (Math.PI / 2) * g.deathDir;
@@ -3122,15 +3120,15 @@ function setupConnection() {
                         };
                 });
                 
-                signalState = data.sig;
-                retreatState = data.ret;
-                resultState = data.res; // リザルト同期
+                // signalState = data.sig; <-- 受信側も削除
+                // retreatState = data.ret; <-- 受信側も削除 (ローカルのクリック状態をHostの古い状態で上書きさせない)
+                // resultState = data.res;  <-- 受信側も削除
 
                 fixedTime = data.t;
                 gameCleared = data.cl;
                 isGameOver = data.go;
                 isGreyMode = data.gm;
-                isAbductedSequence = data.ab; // 連れ去り演出同期
+                isAbductedSequence = data.ab;
                 isFriendlyFire = data.ff;
                 
                 otherPlayerName = data.hn;
@@ -3148,7 +3146,7 @@ function setupConnection() {
                     seed: data.seed, 
                     colorIdx: data.colorIdx, 
                     normalIdx: data.normalIdx, 
-                    rageIdx: data.rageIdx,
+                    rageIdx: data.rageIdx, 
                     playCount: data.playCount 
                 });
                 
