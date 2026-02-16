@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.9.1</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.9.3</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -1235,6 +1235,8 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null, grey
 
     if (isGreyInfinite) {
         isGreyMode = true; // 強制グレイ
+    } else if (isDebugMode) {
+        isGreyMode = false; // 通常予演モードはグレイにならない
     } else {
         isGreyMode = (playCount >= 2 && rnd.nextFloat() < 0.01); 
     }
@@ -1565,6 +1567,7 @@ function placeGoblins() {
         pos.y < GRID_H - 10 && !(pos.x === daughter.x && pos.y === daughter.y)
     );
     
+    // --- 【修正】 元の仕様(7体)に戻しました ---
     let goblinCount = isGreyMode ? 7 : Math.max(5, Math.min(Math.floor(validTiles.length * 0.1), 40));
     
     for(let i=0; i<goblinCount; i++) {
@@ -1608,8 +1611,9 @@ function gameLoopStep() {
                 [player1, player2].forEach(p => {
                     if (Math.abs(p.x - a.x) <= 1 && Math.abs(p.y - a.y) <= 1) {
                         hpP1 = 0; hpP2 = 0; 
+                        // グレイ無限モードなら即死 -> アブダクション
                         if ((!isDebugMode || isGreyInfinite) && !isGameOver && !gameCleared && !isGreyAbduction) {
-                            startGreyAbduction(); // グレイモード即死 -> アブダクション
+                            startGreyAbduction(); 
                         }
                     }
                 });
@@ -2083,7 +2087,6 @@ function startGreyAbduction() {
     greyAbductionPhase = 1; // Yellow Flash Start
     
     // オンラインならホストから同期パケットを送る
-    // (ゲストもここで呼ぶが、ゲストはsendしない、ホストが検知して送る)
     if (isHost && conn && conn.open) {
         conn.send({ type: 'GREY_ABDUCTION' });
     }
@@ -2514,7 +2517,6 @@ function drawGameScreen() {
             
             // "外側からもやが晴れる" -> 外側が透明、中心が白い。
             // 視界が外側から戻る。
-            // 単純な白フェードではなく、ラジアルグラデーションで外側を透明にする
             const cx = VIRTUAL_WIDTH / 2;
             const cy = VIRTUAL_HEIGHT / 2;
             const maxR = Math.hypot(cx, cy);
