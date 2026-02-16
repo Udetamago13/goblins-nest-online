@@ -304,9 +304,9 @@ const visionHoleCanvas = document.createElement('canvas');
 visionHoleCanvas.width = visionSize; visionHoleCanvas.height = visionSize;
 const vhCtx = visionHoleCanvas.getContext('2d');
 const vhGrad = vhCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
-vhGrad.addColorStop(0, "rgba(0,0,0,1)");              
-vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");        
-vhGrad.addColorStop(1, "rgba(0,0,0,0)");              
+vhGrad.addColorStop(0, "rgba(0,0,0,1)");               
+vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");         
+vhGrad.addColorStop(1, "rgba(0,0,0,0)");               
 vhCtx.fillStyle = vhGrad;
 vhCtx.beginPath(); vhCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); vhCtx.fill();
 
@@ -428,6 +428,13 @@ let signalState = {
     p2: false,  
     startTime: 0,
     agreedTime: 0 
+};
+
+// 撤退機能用のステート変数
+let retreatState = {
+    active: false,
+    proposer: null, // 'p1' or 'p2'
+    confirmed: false
 };
 
 if (safeGetItem('goblinsNest_gatePassed')) {
@@ -582,6 +589,7 @@ function update() {
                                 ic: g.isCasting
                             })),
                             sig: signalState, 
+                            ret: retreatState, // 撤退状態も同期
                             t: (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime,
                             cl: gameCleared,
                             go: isGameOver,
@@ -649,9 +657,9 @@ function updateInputPosition() {
              controlsHelpEl.innerText = "【P1】移動:矢印 攻撃:Z 【P2】移動:WASD 攻撃:X | R:リスタート | [DEBUG MODE]";
         } else {
              if (isHost) {
-                 controlsHelpEl.innerText = "【P1(あなた)】移動:矢印 攻撃:Z | 【P2(相棒)】操作待受中 | R:合図";
+                 controlsHelpEl.innerText = "【P1(あなた)】移動:矢印 攻撃:Z | 【P2(相棒)】操作待受中";
              } else {
-                 controlsHelpEl.innerText = "【P2(あなた)】移動:矢印 攻撃:Z | 【P1(相棒)】操作待受中 | R:合図";
+                 controlsHelpEl.innerText = "【P2(あなた)】移動:矢印 攻撃:Z | 【P1(相棒)】操作待受中";
              }
         }
     }
@@ -1000,6 +1008,41 @@ function playSignalSound(type) {
     }
 } // --- playSignalSound 終了 ---
 
+function playRetreatTrumpet() {
+    if (isMutedSE) return;
+    const actx = getSharedAudioContext();
+    if (!actx) return;
+
+    try {
+        const now = actx.currentTime;
+        const vol = seVolume * 0.6;
+        // C5, E5, G5, C6 (Major arpeggio)
+        const freqs = [523.25, 659.25, 783.99, 1046.50];
+        const times = [0, 0.15, 0.3, 0.45];
+        const durs = [0.15, 0.15, 0.15, 0.6];
+
+        freqs.forEach((freq, i) => {
+            const osc = actx.createOscillator();
+            const gain = actx.createGain();
+            // 矩形波とノコギリ波を混ぜるイメージだが、ここではSawtoothで明るく
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(freq, now + times[i]);
+            
+            osc.connect(gain);
+            gain.connect(actx.destination);
+            
+            gain.gain.setValueAtTime(0, now + times[i]);
+            gain.gain.linearRampToValueAtTime(vol, now + times[i] + 0.05);
+            gain.gain.linearRampToValueAtTime(0, now + times[i] + durs[i]);
+            
+            osc.start(now + times[i]);
+            osc.stop(now + times[i] + durs[i]);
+        });
+    } catch(e) {
+        console.warn("AudioContext limit reached");
+    }
+} // --- playRetreatTrumpet 終了 ---
+
 function playClickSound() {
     if (isMutedSE) return;
     const actx = getSharedAudioContext(); 
@@ -1149,6 +1192,9 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     
     signalState = { active: false, type: null, startTime: 0, p1: false, p2: false, agreedTime: 0 };
     signalMsgEl.style.opacity = 0;
+    
+    // 撤退ボタンのリセット
+    retreatState = { active: false, proposer: null, confirmed: false };
 
     if (!isDebugMode && isHost && conn && conn.open) {
         conn.send({ 
@@ -2376,9 +2422,7 @@ function drawGameScreen() {
         } else if (effectiveGameOver) {
             if (signalState.type === 'R') msg = "再起の合図だ！(R)";
             else if (signalState.type === 'W') msg = "帰還の合図だ！(W)";
-        } else {
-            if (signalState.type === 'R') msg = "撤退の合図だ！(R)";
-        }
+        } 
         
         if (msg) {
             signalMsgEl.innerText = msg;
@@ -2524,6 +2568,65 @@ function drawHeartsUI() {
         ctx.fillText("♥", x, y);
     }
     ctx.restore();
+
+    // 撤退ボタンの描画 (ゲームオーバー/クリア時、デバッグモード時は非表示or無効化)
+    const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
+    if (!effectiveGameOver && !gameCleared && !isDebugMode) {
+        ctx.save();
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "center";
+        
+        // 左下(FFボタン)の右隣に配置
+        // FFボタン: x:50~190, y:VIRTUAL_HEIGHT-80
+        // 撤退ボタン: x:200~340, y:VIRTUAL_HEIGHT-80
+        const btnX = 200;
+        const btnY = VIRTUAL_HEIGHT - 80;
+        const btnW = 140;
+        const btnH = 40;
+        
+        const TEXT_OFFSET_Y = -4; 
+        const btnCenterY = btnY + btnH/2;
+        const btnCenterX = btnX + btnW/2;
+        
+        ctx.lineWidth = 2;
+        ctx.font = "20px 'DotGothic16'";
+
+        if (retreatState.confirmed) {
+            // 撤退確定 (赤)
+            ctx.fillStyle = "#ff0000";
+            ctx.fillRect(btnX, btnY, btnW, btnH);
+            ctx.strokeStyle = "#ffffff";
+            ctx.strokeRect(btnX, btnY, btnW, btnH);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText("撤退！", btnCenterX, btnCenterY + TEXT_OFFSET_Y);
+        } else if (retreatState.active) {
+            // 提案中 or 要請中 (黄色点滅)
+            const blink = Math.floor(Date.now() / 200) % 2 === 0;
+            if (blink) {
+                ctx.fillStyle = "rgba(255, 255, 0, 0.3)";
+                ctx.fillRect(btnX, btnY, btnW, btnH);
+                ctx.strokeStyle = "#ffff00";
+            } else {
+                ctx.strokeStyle = "#aaaa00";
+            }
+            ctx.strokeRect(btnX, btnY, btnW, btnH);
+            
+            ctx.fillStyle = "#ffff00";
+            const isMe = isHost ? 'p1' : 'p2';
+            if (retreatState.proposer === isMe) {
+                ctx.fillText("提案中", btnCenterX, btnCenterY + TEXT_OFFSET_Y);
+            } else {
+                ctx.fillText("要請中", btnCenterX, btnCenterY + TEXT_OFFSET_Y);
+            }
+        } else {
+            // 通常 (白)
+            ctx.strokeStyle = "#ffffff";
+            ctx.strokeRect(btnX, btnY, btnW, btnH);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText("撤退", btnCenterX, btnCenterY + TEXT_OFFSET_Y);
+        }
+        ctx.restore();
+    }
 } 
 
 function renderFloorCanvas() {
@@ -2637,7 +2740,7 @@ function renderFloorCanvas() {
     
     const grad = floorCtx.createLinearGradient(0, gradYStart, 0, gradYEnd);
     grad.addColorStop(0, isGreyMode ? "rgba(0, 255, 100, 0.8)" : "rgba(255, 255, 200, 0.8)"); 
-    grad.addColorStop(1, isGreyMode ? "rgba(0, 255, 100, 0)" : "rgba(255, 255, 200, 0)");        
+    grad.addColorStop(1, isGreyMode ? "rgba(0, 255, 100, 0)" : "rgba(255, 255, 200, 0)");         
     
     floorCtx.fillStyle = grad;
     floorCtx.fillRect(startLeftX*SCALED_TILE, gradYEnd, SCALED_TILE*2, SCALED_TILE*3);
@@ -2750,6 +2853,63 @@ function handleDown(e) {
             playClickSound();
         }
     }
+    // ゲーム中
+    else if (gameState === 'game') {
+        const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
+        
+        // 撤退ボタン (ゲームオーバー/クリア/デバッグ以外)
+        if (!effectiveGameOver && !gameCleared && !isDebugMode) {
+             const btnX = 200;
+             const btnY = VIRTUAL_HEIGHT - 80;
+             const btnW = 140;
+             const btnH = 40;
+             
+             if (pos.x >= btnX && pos.x <= btnX + btnW && pos.y >= btnY && pos.y <= btnY + btnH) {
+                 const isMe = isHost ? 'p1' : 'p2';
+                 
+                 // 撤退確定済みなら何もしない (パケット送信済み)
+                 if (retreatState.confirmed) return;
+
+                 if (!retreatState.active) {
+                     // 提案開始
+                     retreatState.active = true;
+                     retreatState.proposer = isMe;
+                     playSignalSound('R'); // キーン
+                     if (conn && conn.open) {
+                         conn.send({ type: 'RETREAT_UPDATE', active: true, proposer: isMe });
+                     }
+                 } else {
+                     // すでにActive
+                     if (retreatState.proposer === isMe) {
+                         // 自分で提案中 -> キャンセル
+                         retreatState.active = false;
+                         retreatState.proposer = null;
+                         // 音は鳴らさない
+                         if (conn && conn.open) {
+                             conn.send({ type: 'RETREAT_UPDATE', active: false, proposer: null });
+                         }
+                     } else {
+                         // 相手が提案中 -> 受諾 (確定)
+                         retreatState.confirmed = true;
+                         playRetreatTrumpet(); // ファンファーレ
+                         if (conn && conn.open) {
+                             conn.send({ type: 'RETREAT_CONFIRM' });
+                         }
+                         
+                         // ホストなら即実行
+                         if (isHost) {
+                             setTimeout(() => {
+                                 if (!isGameOver && !gameCleared) {
+                                     startDungeonGame(false);
+                                 }
+                             }, 2000); // 音の余韻
+                         }
+                     }
+                 }
+                 return;
+             }
+        }
+    }
 } 
 
 function getMousePos(e) {
@@ -2806,6 +2966,7 @@ window.addEventListener('keydown', (e) => {
 
         if (e.key === 'r' || e.key === 'R') {
             if (!isDebugMode) {
+                // 通常プレイ中のRキーシグナルは廃止。結果画面でのみ有効。
                 if (effectiveGameOver || gameCleared) {
                     signalState.active = true;
                     signalState.type = 'R';
@@ -2815,21 +2976,14 @@ window.addEventListener('keydown', (e) => {
                     
                     if (conn && conn.open) conn.send({ type: 'SIGNAL', key: 'R' });
                     playSignalSound('R');
-                } else if (!signalState.active) {
-                    signalState.active = true;
-                    signalState.type = 'R';
-                    signalState.startTime = performance.now();
-                    if (isHost) signalState.p1 = true;
-                    else signalState.p2 = true;
-                    if (conn && conn.open) conn.send({ type: 'SIGNAL', key: 'R' });
-                    playSignalSound('R');
-                }
+                } 
             } else {
                 startDungeonGame(true);
             }
         }
         if (e.key === 'w' || e.key === 'W') {
              if (!isDebugMode) {
+                // 通常プレイ中のWキーシグナルは廃止。結果画面でのみ有効。
                 if (effectiveGameOver || gameCleared) {
                     signalState.active = true;
                     signalState.type = 'W';
@@ -2839,15 +2993,7 @@ window.addEventListener('keydown', (e) => {
                     
                     if (conn && conn.open) conn.send({ type: 'SIGNAL', key: 'W' });
                     playSignalSound('W');
-                } else if (!signalState.active) {
-                    signalState.active = true;
-                    signalState.type = 'W';
-                    signalState.startTime = performance.now();
-                    if (isHost) signalState.p1 = true;
-                    else signalState.p2 = true;
-                    if (conn && conn.open) conn.send({ type: 'SIGNAL', key: 'W' });
-                    playSignalSound('W');
-                }
+                } 
             }
         }
 
@@ -2999,6 +3145,22 @@ function setupConnection() {
             else if (data.type === 'NAME') {
                 otherPlayerName = data.name;
             }
+            // 撤退機能: ホスト受信
+            else if (data.type === 'RETREAT_UPDATE') {
+                retreatState.active = data.active;
+                retreatState.proposer = data.proposer;
+                if (data.active) playSignalSound('R'); // 提案受信: キーン
+            }
+            else if (data.type === 'RETREAT_CONFIRM') {
+                retreatState.confirmed = true;
+                playRetreatTrumpet(); // 確定受信: ラッパ
+                // 実行
+                setTimeout(() => {
+                    if (!isGameOver && !gameCleared) {
+                        startDungeonGame(false);
+                    }
+                }, 2000);
+            }
         } else {
             if (data.type === 'SYNC') {
                 player1.x = data.p1.x; player1.y = data.p1.y; player1.facing = data.p1.f; player1.stepCount = data.p1.sc;
@@ -3017,15 +3179,17 @@ function setupConnection() {
 
                 if (goblins.length !== data.g.length) goblins = new Array(data.g.length).fill({});
                 data.g.forEach((gData, i) => {
-                      goblins[i] = {
-                          x: gData.x, y: gData.y, facing: gData.f, state: gData.s, hp: gData.hp,
-                          sizeScale: gData.sc, bobOffset: gData.bo, 
-                          deathTime: gData.dt, deathAngle: gData.da, dissolveProgress: gData.dp,
-                          isCasting: gData.ic
-                      };
+                       goblins[i] = {
+                           x: gData.x, y: gData.y, facing: gData.f, state: gData.s, hp: gData.hp,
+                           sizeScale: gData.sc, bobOffset: gData.bo, 
+                           deathTime: gData.dt, deathAngle: gData.da, dissolveProgress: gData.dp,
+                           isCasting: gData.ic
+                       };
                 });
                 
                 signalState = data.sig;
+                retreatState = data.ret; // 撤退同期
+
                 fixedTime = data.t;
                 gameCleared = data.cl;
                 isGameOver = data.go;
