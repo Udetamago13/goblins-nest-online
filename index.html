@@ -82,11 +82,11 @@
             letter-spacing: 2px; text-align: center; white-space: pre-wrap;
         }
         #result-rank {
-            position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); /* 少し上に移動 */
+            position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
             color: #fff; font-size: 28px; background: rgba(0,0,0,0.9); padding: 40px 60px;
             border-radius: 30px; display: none; text-align: center; line-height: 1.8;
             width: 80%; box-shadow: 0 0 30px #0ff; 
-            pointer-events: none; /* 下のCanvasボタンをクリックできるように透過 */
+            pointer-events: none;
             z-index: 20;
         }
         #controls-help {
@@ -553,7 +553,9 @@ function update() {
     updateInputPosition(); 
     
     if (gameState === 'game') {
-        // --- 拉致シーケンスの更新処理 ---
+        // --- 1. 拉致演出中かどうかの判定 (ロジック停止用) ---
+        let skipGameLogic = false;
+        
         if (abductionState.active) {
             const elapsed = (performance.now() - abductionState.startTime) / 1000;
             
@@ -572,108 +574,110 @@ function update() {
                 abductionState.active = false;
                 isInputLocked = false;
             }
-            // 拉致中は通常のゲーム更新を行わない
-            draw();
-            requestAnimationFrame(update);
-            return;
+            // 拉致中は通常のゲーム更新（移動など）を行わない
+            skipGameLogic = true; 
         }
 
-        if (!foundDaughterNotified && daughter.rescued) {
-             foundDaughter = true;
-             foundDaughterNotified = true;
-             enterRageBgm();
-             goblins.forEach(g => { if(g.hp>0 && !isGreyMode) setGoblinState(g, STATE.RAGE, performance.now()); });
-             updateInfoText();
-        }
+        // --- 2. 通常ゲームロジック (拉致中でなければ実行) ---
+        if (!skipGameLogic) {
+            if (!foundDaughterNotified && daughter.rescued) {
+                 foundDaughter = true;
+                 foundDaughterNotified = true;
+                 enterRageBgm();
+                 goblins.forEach(g => { if(g.hp>0 && !isGreyMode) setGoblinState(g, STATE.RAGE, performance.now()); });
+                 updateInfoText();
+            }
 
-        if (!isDebugMode && (hpP1 <= 0 || hpP2 <= 0) && !isGameOver) {
-            // ここでのゲームオーバー判定はホスト側damagePlayer等で管理するため、ここではセーフティとして残すが基本はそちらに任せる
-        }
+            if (!isDebugMode && (hpP1 <= 0 || hpP2 <= 0) && !isGameOver) {
+                // セーフティ: ここでの判定は基本的にホストのdamagePlayerに任せるが、万が一のためのプレースホルダー
+            }
 
-        // --- クリア画面の続行・帰還ロジック ---
-        if (gameCleared && !isDebugMode) {
-             // 優先順位：続行が確定していれば帰還は無視
-             if (continueState.confirmed) {
-                 if (performance.now() - continueState.confirmTime > 1500) { // 1.5秒待機
-                      startDungeonGame(false);
-                      // ステートリセット
-                      continueState.confirmed = false;
-                      continueState.active = false;
-                      continueState.proposer = null;
+            // --- クリア画面の続行・帰還ロジック ---
+            if (gameCleared && !isDebugMode) {
+                 // 優先順位：続行が確定していれば帰還は無視
+                 if (continueState.confirmed) {
+                     if (performance.now() - continueState.confirmTime > 1500) { // 1.5秒待機
+                          startDungeonGame(false);
+                          // ステートリセット
+                          continueState.confirmed = false;
+                          continueState.active = false;
+                          continueState.proposer = null;
+                     }
+                 } else if (returnState.confirmed) {
+                     if (performance.now() - returnState.confirmTime > 1500) { // 1.5秒待機
+                          if (conn && conn.open) conn.send({ type: 'GO_TITLE' });
+                          location.reload();
+                     }
                  }
-             } else if (returnState.confirmed) {
-                 if (performance.now() - returnState.confirmTime > 1500) { // 1.5秒待機
-                      if (conn && conn.open) conn.send({ type: 'GO_TITLE' });
-                      location.reload();
-                 }
-             }
-        }
+            }
 
-        if (!isDebugMode) { 
-            if (isHost) {
-                let processed = 0;
-                while (guestInputQueue.length > 0 && processed < 5) {
-                    const input = guestInputQueue.shift();
-                    if (input.type === 'MOVE') {
-                        movePlayer(player2, input.dx, input.dy);
-                    } else if (input.type === 'ATTACK') {
-                        playerAttack(player2);
+            if (!isDebugMode) { 
+                if (isHost) {
+                    let processed = 0;
+                    while (guestInputQueue.length > 0 && processed < 5) {
+                        const input = guestInputQueue.shift();
+                        if (input.type === 'MOVE') {
+                            movePlayer(player2, input.dx, input.dy);
+                        } else if (input.type === 'ATTACK') {
+                            playerAttack(player2);
+                        }
+                        processed++;
                     }
-                    processed++;
-                }
 
-                // 従来のシグナル処理（クリア画面以外用）
-                if (signalState.active && signalState.p1 && signalState.p2 && !gameCleared) {
-                    if (!signalState.agreedTime) {
-                        signalState.agreedTime = performance.now(); 
-                    } else {
-                        if (performance.now() - signalState.agreedTime > 2000) {
-                            if (signalState.type === 'R') {
-                                startDungeonGame(false); 
-                            } else if (signalState.type === 'W') {
-                                if (conn && conn.open) conn.send({ type: 'GO_TITLE' });
-                                location.reload();
+                    // 従来のシグナル処理（クリア画面以外用）
+                    if (signalState.active && signalState.p1 && signalState.p2 && !gameCleared) {
+                        if (!signalState.agreedTime) {
+                            signalState.agreedTime = performance.now(); 
+                        } else {
+                            if (performance.now() - signalState.agreedTime > 2000) {
+                                if (signalState.type === 'R') {
+                                    startDungeonGame(false); 
+                                } else if (signalState.type === 'W') {
+                                    if (conn && conn.open) conn.send({ type: 'GO_TITLE' });
+                                    location.reload();
+                                }
                             }
                         }
                     }
-                }
 
-                gameLoopStep(); 
-
-                if (conn && conn.open) {
-                    const now = performance.now();
-                    if (now - lastSyncTime > SYNC_INTERVAL) {
-                        const state = {
-                            type: 'SYNC',
-                            p1: { x: player1.x, y: player1.y, f: player1.facing, sc: player1.stepCount, dd: player1.deathDir },
-                            p2: { x: player2.x, y: player2.y, f: player2.facing, sc: player2.stepCount, dd: player2.deathDir },
-                            hp: { p1: hpP1, p2: hpP2 },
-                            d: { x: daughter.x, y: daughter.y, r: daughter.rescued, er: daughter.rescuer },
-                            b: { x: healingBiscuit.x, y: healingBiscuit.y, a: healingBiscuit.active },
-                            g: goblins.map(g => ({
-                                x: g.x, y: g.y, f: g.facing, s: g.state, hp: g.hp, 
-                                sc: g.sizeScale, bo: g.bobOffset,
-                                dt: g.deathTime, da: g.deathAngle, dp: g.dissolveProgress,
-                                ic: g.isCasting
-                            })),
-                            sig: signalState, 
-                            ret: retreatState,
-                            cont: continueState, // 追加
-                            rtrn: returnState,   // 追加
-                            t: (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime,
-                            cl: gameCleared,
-                            go: isGameOver,
-                            gm: isGreyMode,
-                            hn: nameEl.value,
-                            ff: isFriendlyFire
-                        };
-                        conn.send(state);
-                        lastSyncTime = now;
-                    }
+                    gameLoopStep(); 
                 }
+            } else {
+                gameLoopStep();
             }
-        } else {
-            gameLoopStep();
+        }
+
+        // --- 3. 通信 (SYNC) - ★いかなる状況でもホストなら必ず送る (拉致中も、ゲームオーバー後も) ---
+        if (isHost && !isDebugMode && conn && conn.open) {
+            const now = performance.now();
+            if (now - lastSyncTime > SYNC_INTERVAL) {
+                const state = {
+                    type: 'SYNC',
+                    p1: { x: player1.x, y: player1.y, f: player1.facing, sc: player1.stepCount, dd: player1.deathDir },
+                    p2: { x: player2.x, y: player2.y, f: player2.facing, sc: player2.stepCount, dd: player2.deathDir },
+                    hp: { p1: hpP1, p2: hpP2 },
+                    d: { x: daughter.x, y: daughter.y, r: daughter.rescued, er: daughter.rescuer },
+                    b: { x: healingBiscuit.x, y: healingBiscuit.y, a: healingBiscuit.active },
+                    g: goblins.map(g => ({
+                        x: g.x, y: g.y, f: g.facing, s: g.state, hp: g.hp, 
+                        sc: g.sizeScale, bo: g.bobOffset,
+                        dt: g.deathTime, da: g.deathAngle, dp: g.dissolveProgress,
+                        ic: g.isCasting
+                    })),
+                    sig: signalState, 
+                    ret: retreatState,
+                    cont: continueState, 
+                    rtrn: returnState,   
+                    t: (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime,
+                    cl: gameCleared,
+                    go: isGameOver,
+                    gm: isGreyMode,
+                    hn: nameEl.value,
+                    ff: isFriendlyFire
+                };
+                conn.send(state);
+                lastSyncTime = now;
+            }
         }
     }
 
@@ -3472,7 +3476,7 @@ function setupConnection() {
             }
         } else {
             if (data.type === 'SYNC') {
-                // エッジ検出のための前回状態保存
+                // --- 修正箇所：エッジ検出と強制死亡判定 ---
                 const prevGameOver = isGameOver;
                 const prevGameCleared = gameCleared;
 
@@ -3515,7 +3519,7 @@ function setupConnection() {
 
                 updateInputPosition();
 
-                // エッジ検出によるUI表示トリガー
+                // エッジ検出：フラグが切り替わった瞬間を検知
                 if (!prevGameOver && isGameOver) {
                     timerStopped = true;
                     showResult(); 
@@ -3528,6 +3532,13 @@ function setupConnection() {
                         clearBGM.play().catch(()=>{});
                     }
                     showResult(); 
+                }
+                
+                // ★【二重安全装置】HPが0なのにGame Overになっていない場合、強制的に死ぬ
+                if ((hpP1 <= 0 || hpP2 <= 0) && !isGameOver && !gameCleared) {
+                    isGameOver = true;
+                    timerStopped = true;
+                    showResult();
                 }
 
             } else if (data.type === 'START') {
