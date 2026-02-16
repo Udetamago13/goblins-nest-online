@@ -81,7 +81,7 @@
             letter-spacing: 2px; text-align: center; white-space: pre-wrap;
         }
         #result-rank {
-            /* 位置を上に修正し、高さを圧縮 */
+            /* 修正: ゲームオーバー画面でボタンと被らないよう位置を上げ、高さを自動調整 */
             position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%);
             color: #fff; font-size: 28px; background: rgba(0,0,0,0.9); padding: 30px 60px;
             border-radius: 30px; display: none; text-align: center; line-height: 1.5;
@@ -123,6 +123,7 @@
 </div>
 
 <script>
+// --- Xorshift乱数生成クラス ---
 class Xorshift {
     constructor(seed = 88675123) {
         this.x = 123456789;
@@ -138,6 +139,7 @@ class Xorshift {
     }
 }
 
+// --- Fisher-Yates Shuffle ---
 function shuffleArray(array, rng) {
     for (let i = array.length - 1; i > 0; i--) {
         const j = Math.floor(rng.nextFloat() * (i + 1));
@@ -146,6 +148,7 @@ function shuffleArray(array, rng) {
     return array;
 }
 
+// --- 音響資源管理 ---
 let sharedAudioCtx = null;
 function getSharedAudioContext() {
     if (!sharedAudioCtx) {
@@ -176,6 +179,7 @@ function safeSetItem(key, val) {
     try { localStorage.setItem(key, val); } catch (e) { }
 } 
 
+// --- DOM & Variables ---
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const nameEl = document.getElementById('nameInput');
@@ -239,7 +243,7 @@ const SYNC_INTERVAL = 33;
 let otherPlayerName = ""; 
 
 let isGreyMode = false;
-let lastModeWasGrey = false; // 前回がグレイモードだったか記録
+let lastModeWasGrey = false; // 前回がグレイモードだったか記録（連続防止用）
 let isDebugMode = false; 
 let psychicArrays = []; 
 let currentBgmDebugName = ""; 
@@ -415,6 +419,7 @@ let minimapFloorCtx = minimapFloorCanvas.getContext('2d');
 let minimapFloorDrawn = false;
 let lastMinimapUpdate = 0;
 
+// ステート定義
 let signalState = { active: false, type: null, p1: false, p2: false, startTime: 0, agreedTime: 0 };
 let retreatState = { active: false, proposer: null, confirmed: false };
 let continueState = { active: false, proposer: null, confirmed: false, confirmTime: 0 };
@@ -518,6 +523,7 @@ function update() {
     updateInputPosition(); 
     
     if (gameState === 'game') {
+        // --- 拉致シーケンス ---
         if (abductionState.active) {
             const elapsed = (performance.now() - abductionState.startTime) / 1000;
             if (elapsed >= 1.0 && !abductionState.resetDone) {
@@ -545,6 +551,7 @@ function update() {
              updateInfoText();
         }
 
+        // --- ホスト側 ゲームオーバー判定 ---
         if (!isDebugMode && (hpP1 <= 0 || hpP2 <= 0) && !isGameOver) {
             isGameOver = true;
             gameOverTime = performance.now(); 
@@ -552,6 +559,7 @@ function update() {
             showResult();
         }
 
+        // --- クリア画面のロジック ---
         if (gameCleared && !isDebugMode) {
              if (continueState.confirmed) {
                  if (performance.now() - continueState.confirmTime > 1500) { 
@@ -568,6 +576,7 @@ function update() {
              }
         }
         
+        // --- ゲームオーバー画面のロジック ---
         if (isGameOver && !isDebugMode) {
              if (retryState.confirmed) {
                  if (performance.now() - retryState.confirmTime > 2000) { 
@@ -604,6 +613,7 @@ function update() {
                     processed++;
                 }
 
+                // シグナル（旧仕様・通常時用）
                 if (signalState.active && signalState.p1 && signalState.p2 && !gameCleared && !isGameOver) {
                     if (!signalState.agreedTime) {
                         signalState.agreedTime = performance.now(); 
@@ -655,10 +665,10 @@ function update() {
                     }
                 }
             } else {
-                gameLoopStep();
+                gameLoopStep(); // ゲスト側ループ
             }
         } else {
-            gameLoopStep();
+            gameLoopStep(); // デバッグ時ループ
         }
     }
 
@@ -1266,8 +1276,6 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     if (isRetry) {
         // リトライ時はグレイモードの状態を維持する
         // (前回がグレイなら今回もグレイ、通常なら通常)
-        // hostOverrideDataでisGreyModeを渡していないので再計算になるが、
-        // seedValが同じなのでrnd.nextFloat()も同じ結果になるはず。
         isGreyMode = (playCount >= 2 && rnd.nextFloat() < 0.01);
     } else {
         // 新規プレイ時は「連続発生防止」ロジックを適用
@@ -2027,6 +2035,7 @@ function damagePlayer(p, amount) {
     const lastHit = p === player1 ? p1LastHitTime : p2LastHitTime;
     if (now - lastHit < IFRAME_DURATION) return;
     
+    // HP減少はホストのみ実行
     if (isHost || isDebugMode) {
         if (p === player1) { hpP1 = Math.max(0, hpP1 - amount); p1LastHitTime = now; }
         else { hpP2 = Math.max(0, hpP2 - amount); p2LastHitTime = now; }
@@ -2069,7 +2078,7 @@ function damagePlayer(p, amount) {
 } 
 
 function movePlayer(p, dx, dy) {
-    if (abductionState.active) return; // 拉致中は移動不可
+    if (abductionState.active) return; 
     if (!isDebugMode && (isGameOver || gameCleared)) return;
 
     if (dx === 0 && dy === -1) p.facing = 0;
@@ -2105,7 +2114,7 @@ function movePlayer(p, dx, dy) {
 } 
 
 function playerAttack(p) {
-    if (abductionState.active) return; // 拉致中は攻撃不可
+    if (abductionState.active) return;
     if (!isDebugMode && daughter.rescued && daughter.rescuer === (p === player1 ? 'p1' : 'p2')) return;
     if (!isDebugMode && (isGameOver || gameCleared)) return;
 
@@ -2189,17 +2198,14 @@ function showResult() {
          hintEl.style.display = 'block';
          timeEl.style.display = 'block';
     } else {
+        // ボタンUIに移行するため、テキストヒントは非表示
+        hintEl.style.display = 'none'; 
+        
         if (gameCleared) {
-            hintEl.style.display = 'none'; // クリア時はボタンUIのため非表示
-            timeEl.style.display = 'block'; // タイムは表示
+            timeEl.style.display = 'block'; 
         } else if (isGameOver) {
-            hintEl.style.display = 'none'; // ゲームオーバー時もボタンUIのため非表示
-            timeEl.style.display = 'none'; // ゲームオーバー時はタイム不要（スペース確保）
-        } else {
-            hintEl.innerHTML = "(R: 再起 / W: 撤退)"; 
-            hintEl.style.display = 'block';
-            timeEl.style.display = 'block';
-        }
+            timeEl.style.display = 'none'; // ゲームオーバー時はタイム非表示（スペース確保）
+        } 
     }
 
     if ((hpP1 <= 0 || hpP2 <= 0) && !gameCleared) {
@@ -2232,8 +2238,10 @@ function showResult() {
 function drawGameScreen() {
     ctx.fillStyle = "#111"; ctx.fillRect(0,0,VIRTUAL_WIDTH,VIRTUAL_HEIGHT);
     const now = performance.now();
+    
     let targetPlayer = player1;
     if (!isHost && !isDebugMode) targetPlayer = player2; 
+    
     let vx = targetPlayer.x - VIEW_TILES_X/2;
     let vy = targetPlayer.y - VIEW_TILES_Y/2;
     vx = Math.max(0, Math.min(vx, GRID_W - VIEW_TILES_X));
@@ -2539,6 +2547,7 @@ function drawHeartsUI() {
 
     const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
     
+    // --- ボタンUI描画 ---
     ctx.save();
     ctx.textBaseline = "middle";
     ctx.textAlign = "center";
@@ -2550,14 +2559,18 @@ function drawHeartsUI() {
     const btnCenterY = btnY + btnH/2;
     const TEXT_OFFSET_Y = -4;
 
+    // A. クリア画面のUI
     if (gameCleared && !isDebugMode) {
         const isMe = isHost ? 'p1' : 'p2';
+        
+        // 続行ボタン
         const contX = 40;
         const contCenterX = contX + btnW/2;
         let contLabel = "続行";
         let contBg = "";
         let contStroke = "#ffffff";
         let contTextCol = "#ffffff";
+
         if (continueState.confirmed) {
             contBg = "#ff0000"; contLabel = "続行"; 
         } else if (continueState.active) {
@@ -2576,12 +2589,14 @@ function drawHeartsUI() {
         ctx.strokeStyle = contStroke; ctx.strokeRect(contX, btnY, btnW, btnH);
         ctx.fillStyle = contTextCol; ctx.fillText(contLabel, contCenterX, btnCenterY + TEXT_OFFSET_Y);
 
+        // 帰還ボタン
         const retX = VIRTUAL_WIDTH - 180;
         const retCenterX = retX + btnW/2;
         let retLabel = "帰還";
         let retBg = "";
         let retStroke = "#ffffff";
         let retTextCol = "#ffffff";
+
         if (returnState.confirmed) {
             retBg = "#ff0000"; retLabel = "帰還";
         } else if (returnState.active) {
@@ -2601,14 +2616,18 @@ function drawHeartsUI() {
         ctx.fillStyle = retTextCol; ctx.fillText(retLabel, retCenterX, btnCenterY + TEXT_OFFSET_Y);
 
     } 
+    // B. ゲームオーバー画面のUI
     else if (isGameOver && !isDebugMode && !abductionState.active) {
         const isMe = isHost ? 'p1' : 'p2';
+
+        // 再起ボタン
         const retryX = 40;
         const retryCenterX = retryX + btnW/2;
         let retryLabel = "再起";
         let retryBg = "";
         let retryStroke = "#ffffff";
         let retryTextCol = "#ffffff";
+
         if (retryState.confirmed) {
             retryBg = "#ff0000"; retryLabel = "再起"; 
         } else if (retryState.active) {
@@ -2623,16 +2642,19 @@ function drawHeartsUI() {
             if (retryState.proposer === isMe) retryLabel = "再起提案中";
             else retryLabel = "再起要請中";
         }
+        
         if (retryBg) { ctx.fillStyle = retryBg; ctx.fillRect(retryX, btnY, btnW, btnH); }
         ctx.strokeStyle = retryStroke; ctx.strokeRect(retryX, btnY, btnW, btnH);
         ctx.fillStyle = retryTextCol; ctx.fillText(retryLabel, retryCenterX, btnCenterY + TEXT_OFFSET_Y);
 
+        // 帰還ボタン
         const retX = VIRTUAL_WIDTH - 180;
         const retCenterX = retX + btnW/2;
         let retLabel = "帰還";
         let retBg = "";
         let retStroke = "#ffffff";
         let retTextCol = "#ffffff";
+
         if (returnState.confirmed) {
             retBg = "#ff0000"; retLabel = "帰還";
         } else if (returnState.active) {
@@ -2651,9 +2673,12 @@ function drawHeartsUI() {
         ctx.strokeStyle = retStroke; ctx.strokeRect(retX, btnY, btnW, btnH);
         ctx.fillStyle = retTextCol; ctx.fillText(retLabel, retCenterX, btnCenterY + TEXT_OFFSET_Y);
     }
+    // C. 通常ゲーム中のUI
     else if (!effectiveGameOver && !gameCleared && !isDebugMode && !abductionState.active) {
         const btnX = 40;
         const btnCenterX = btnX + btnW/2;
+        
+        // 撤退ボタン
         if (retreatState.confirmed) {
             ctx.fillStyle = "#ff0000";
             ctx.fillRect(btnX, btnY, btnW, btnH);
@@ -2835,6 +2860,7 @@ function setupConnection() {
                 signalState = data.sig; retreatState = data.ret; continueState = data.cont; returnState = data.rtrn; retryState = data.retry;
                 fixedTime = data.t; gameCleared = data.cl;
                 
+                // ゲスト側のゲームオーバー処理（同期フック）
                 if (data.go && !isGameOver) {
                     isGameOver = true;
                     gameOverTime = data.got;
