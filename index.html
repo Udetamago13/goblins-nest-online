@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.9.2</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.9.2 Fixed</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -82,11 +82,11 @@
             letter-spacing: 2px; text-align: center; white-space: pre-wrap;
         }
         #result-rank {
-            position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+            position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); /* 少し上に移動 */
             color: #fff; font-size: 28px; background: rgba(0,0,0,0.9); padding: 40px 60px;
             border-radius: 30px; display: none; text-align: center; line-height: 1.8;
             width: 80%; box-shadow: 0 0 30px #0ff; 
-            pointer-events: none;
+            pointer-events: none; /* 下のCanvasボタンをクリックできるように透過 */
             z-index: 20;
         }
         #controls-help {
@@ -137,7 +137,7 @@ class Xorshift {
         this.w = (this.w ^ (this.w >>> 19)) ^ (t ^ (t >>> 8));
         return (this.w >>> 0) / 4294967296;
     }
-} // --- Xorshift 終了 ---
+}
 
 // --- Fisher-Yates Shuffle ---
 function shuffleArray(array, rng) {
@@ -146,7 +146,7 @@ function shuffleArray(array, rng) {
         [array[i], array[j]] = [array[j], array[i]];
     }
     return array;
-} // --- shuffleArray 終了 ---
+}
 
 // --- 音響資源管理用シングルトン ---
 let sharedAudioCtx = null;
@@ -160,7 +160,7 @@ function getSharedAudioContext() {
         sharedAudioCtx.resume().catch(()=>{});
     }
     return sharedAudioCtx;
-} // --- getSharedAudioContext 終了 ---
+}
 
 function hashCode(str) {
     let hash = 0;
@@ -171,7 +171,7 @@ function hashCode(str) {
         hash |= 0; 
     }
     return Math.abs(hash) + 1;
-} // --- hashCode 終了 ---
+}
 
 function safeGetItem(key) {
     try {
@@ -238,7 +238,7 @@ let isDraggingBGM = false;
 let isDraggingSE = false;
 let isDraggingBright = false; 
 
-const PEER_ID_PREFIX = 'gn_beta2_'; 
+const PEER_ID_PREFIX = 'gn_beta2_fixed_'; 
 let peer = null;
 let conn = null;
 let isMatching = false; 
@@ -310,8 +310,8 @@ visionHoleCanvas.width = visionSize; visionHoleCanvas.height = visionSize;
 const vhCtx = visionHoleCanvas.getContext('2d');
 const vhGrad = vhCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
 vhGrad.addColorStop(0, "rgba(0,0,0,1)");                   
-vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");           
-vhGrad.addColorStop(1, "rgba(0,0,0,0)");                   
+vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");          
+vhGrad.addColorStop(1, "rgba(0,0,0,0)");                  
 vhCtx.fillStyle = vhGrad;
 vhCtx.beginPath(); vhCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); vhCtx.fill();
 
@@ -441,7 +441,7 @@ let retreatState = {
     confirmed: false
 };
 
-// --- 新仕様: クリア画面用ステート ---
+// --- クリア画面用ステート（排他制御用） ---
 let continueState = {
     active: false,
     proposer: null,
@@ -503,10 +503,11 @@ function startAbductionSequence() {
     abductionState.active = true;
     abductionState.startTime = performance.now();
     abductionState.resetDone = false;
-    isInputLocked = true; // 入力ロック
-    playElectronicBlip(); // 拉致音（仮）
+    // ロックはしない（通信のため）、入力だけ弾く
+    playElectronicBlip(); 
 }
 
+// --- 通信途絶防止のため、updateループを構造改革 ---
 function update() {
     if (gameState === 'gate') {
         requestAnimationFrame(update);
@@ -553,9 +554,15 @@ function update() {
     updateInputPosition(); 
     
     if (gameState === 'game') {
-        // --- 1. 拉致演出中かどうかの判定 (ロジック停止用) ---
-        let skipGameLogic = false;
-        
+        // --- ゲスト側: 強制同期（状態監視） ---
+        if (!isHost && !isDebugMode) {
+            // ホストから終了フラグが来ているのに画面が出ていない場合、強制表示
+            if ((isGameOver || gameCleared) && document.getElementById('result-rank').style.display === 'none') {
+                showResult();
+            }
+        }
+
+        // --- 1. 特殊演出（拉致）の進行 ---
         if (abductionState.active) {
             const elapsed = (performance.now() - abductionState.startTime) / 1000;
             
@@ -572,14 +579,13 @@ function update() {
             // Phase 3: 覚醒完了 (5.0s)
             if (elapsed >= 5.0) {
                 abductionState.active = false;
-                isInputLocked = false;
             }
-            // 拉致中は通常のゲーム更新（移動など）を行わない
-            skipGameLogic = true; 
         }
 
-        // --- 2. 通常ゲームロジック (拉致中でなければ実行) ---
-        if (!skipGameLogic) {
+        // --- 2. 通常ゲームロジック ---
+        // ラグ回避のため、演出中やクリア後でもホストは通信（SYNC）を送り続ける必要がある。
+        // そのため、ロジック実行を if で囲むが、return はしない。
+        if (!abductionState.active) {
             if (!foundDaughterNotified && daughter.rescued) {
                  foundDaughter = true;
                  foundDaughterNotified = true;
@@ -588,23 +594,17 @@ function update() {
                  updateInfoText();
             }
 
-            if (!isDebugMode && (hpP1 <= 0 || hpP2 <= 0) && !isGameOver) {
-                // セーフティ: ここでの判定は基本的にホストのdamagePlayerに任せるが、万が一のためのプレースホルダー
-            }
-
-            // --- クリア画面の続行・帰還ロジック ---
+            // クリア画面の続行・帰還ロジック
             if (gameCleared && !isDebugMode) {
-                 // 優先順位：続行が確定していれば帰還は無視
                  if (continueState.confirmed) {
-                     if (performance.now() - continueState.confirmTime > 1500) { // 1.5秒待機
+                     if (performance.now() - continueState.confirmTime > 1500) {
                           startDungeonGame(false);
-                          // ステートリセット
                           continueState.confirmed = false;
                           continueState.active = false;
                           continueState.proposer = null;
                      }
                  } else if (returnState.confirmed) {
-                     if (performance.now() - returnState.confirmTime > 1500) { // 1.5秒待機
+                     if (performance.now() - returnState.confirmTime > 1500) {
                           if (conn && conn.open) conn.send({ type: 'GO_TITLE' });
                           location.reload();
                      }
@@ -613,18 +613,18 @@ function update() {
 
             if (!isDebugMode) { 
                 if (isHost) {
+                    // ゲスト入力処理
                     let processed = 0;
                     while (guestInputQueue.length > 0 && processed < 5) {
                         const input = guestInputQueue.shift();
-                        if (input.type === 'MOVE') {
-                            movePlayer(player2, input.dx, input.dy);
-                        } else if (input.type === 'ATTACK') {
-                            playerAttack(player2);
+                        if (!gameCleared && !isGameOver) { // ゲーム中のみ反映
+                            if (input.type === 'MOVE') movePlayer(player2, input.dx, input.dy);
+                            else if (input.type === 'ATTACK') playerAttack(player2);
                         }
                         processed++;
                     }
 
-                    // 従来のシグナル処理（クリア画面以外用）
+                    // シグナル処理（クリア画面以外）
                     if (signalState.active && signalState.p1 && signalState.p2 && !gameCleared) {
                         if (!signalState.agreedTime) {
                             signalState.agreedTime = performance.now(); 
@@ -639,16 +639,23 @@ function update() {
                             }
                         }
                     }
-
-                    gameLoopStep(); 
+                    
+                    // ゲームループ（AIなど）はゲーム中のみ
+                    if (!gameCleared && !isGameOver) {
+                        gameLoopStep(); 
+                    }
+                } else {
+                    // ゲストは自分のループ（予測等があればここ）
+                    gameLoopStep();
                 }
             } else {
-                gameLoopStep();
+                gameLoopStep(); // デバッグモード
             }
-        }
+        } // End of !abductionState.active
 
-        // --- 3. 通信 (SYNC) - ★いかなる状況でもホストなら必ず送る (拉致中も、ゲームオーバー後も) ---
-        if (isHost && !isDebugMode && conn && conn.open) {
+        // --- 3. 最重要: ホストによる定期同期 (NEVER STOP SENDING) ---
+        // ゲームオーバーやクリア、拉致中であっても、状態をゲストに送り続ける
+        if (isHost && conn && conn.open) {
             const now = performance.now();
             if (now - lastSyncTime > SYNC_INTERVAL) {
                 const state = {
@@ -766,21 +773,15 @@ function drawAbductionEffect() {
     
     ctx.save();
     if (elapsed < 0.2) {
-        // Phase 1: Flash (Memory Wipe)
         ctx.fillStyle = "#FFFF00";
         ctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
     } else if (elapsed < 2.5) {
-        // Phase 2: Blackout (Abduction & Reset)
         ctx.fillStyle = "#000000";
         ctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
     } else {
-        // Phase 3: Awakening (Outside-In Reveal)
         const wakeProgress = Math.min(1.0, (elapsed - 2.5) / 2.5);
-        
-        // 基本の白オーバーレイ (徐々に薄くなる)
         const alpha = 1.0 - wakeProgress;
         
-        // 外側から晴れる演出: 中央が最後まで白く残るグラデーション
         const cx = VIRTUAL_WIDTH / 2;
         const cy = VIRTUAL_HEIGHT / 2;
         const maxR = Math.hypot(VIRTUAL_WIDTH, VIRTUAL_HEIGHT) / 1.5;
@@ -836,7 +837,7 @@ function drawTriangleVolumeBar(label, y, volume, color, isMuted) {
     ctx.closePath();
     ctx.fillStyle = color; 
     ctx.fill();
-} // --- drawTriangleVolumeBar 終了 ---
+} 
 
 function drawTitleScreen() {
     ctx.textAlign = "center";
@@ -1085,7 +1086,7 @@ function playElectronicBlip() {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} // --- playElectronicBlip 終了 ---
+} 
 
 function playSignalSound(type) {
     if (isMutedSE) return;
@@ -1122,7 +1123,7 @@ function playSignalSound(type) {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} // --- playSignalSound 終了 ---
+} 
 
 function playRetreatTrumpet() {
     if (isMutedSE) return;
@@ -1156,7 +1157,7 @@ function playRetreatTrumpet() {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} // --- playRetreatTrumpet 終了 ---
+} 
 
 function playFanfare() {
     if (isMutedSE) return;
@@ -1203,7 +1204,7 @@ function playFanfare() {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} // --- playFanfare 終了 ---
+} 
 
 function playClickSound() {
     if (isMutedSE) return;
@@ -1227,7 +1228,7 @@ function playClickSound() {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} // --- playClickSound 終了 ---
+} 
 
 function playChurchBell() {
     if (isMutedSE) return;
@@ -1258,7 +1259,7 @@ function playChurchBell() {
     } catch(e) {
         console.warn("AudioContext limit reached");
     }
-} // --- playChurchBell 終了 ---
+} 
 
 function calculateShortestPath() {
     let startNode = {x: startLeftX, y: startBottomY};
@@ -1288,7 +1289,7 @@ function calculateShortestPath() {
 
 function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     isDebugMode = debugFlag; 
-    guestInputQueue = []; // ゲーム開始時にキューをクリア
+    guestInputQueue = []; 
 
     // --- ステートのリセット ---
     continueState = { active: false, proposer: null, confirmed: false, confirmTime: 0 };
@@ -1701,8 +1702,9 @@ function gameLoopStep() {
             if (t >= a.duration) {
                 [player1, player2].forEach(p => {
                     if (Math.abs(p.x - a.x) <= 1 && Math.abs(p.y - a.y) <= 1) {
-                        hpP1 = 0; hpP2 = 0; 
-                        damagePlayer(p, 100); 
+                        if (isHost || isDebugMode) {
+                             damagePlayer(p, 100); 
+                        }
                     }
                 });
                 return false; 
@@ -1777,7 +1779,7 @@ function updateGoblin(g, now) {
         setGoblinState(g, STATE.ALERT, now); g.targetPlayer = sensedPlayer;
     } else if (g.state === STATE.IDLE && canMove) { 
         const dirs = DIRS.map((d, i) => ({d, i}));
-        shuffleArray(dirs, rnd); // シャッフル修正
+        shuffleArray(dirs, rnd); 
         for (const {d: [dx, dy], i} of dirs) {
             const nx = g.x + dx, ny = g.y + dy;
             if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && grid[ny][nx] === 1 && !isBlockedForGoblin(nx, ny)) {
@@ -2031,7 +2033,7 @@ function updateGrey(g, now) {
         
         if (!moved) {
             const dirs = DIRS.map((d, i) => ({d, i}));
-            shuffleArray(dirs, rnd); // シャッフル修正
+            shuffleArray(dirs, rnd); 
             for (const {d: [dx, dy], i} of dirs) {
                 const nx = g.x + dx, ny = g.y + dy;
                 if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && grid[ny][nx] === 1 && !isBlockedForGoblin(nx, ny)) {
@@ -2131,6 +2133,7 @@ function tryGoblinAttack(g, target, now) {
 } 
 
 function damagePlayer(p, amount) {
+    // --- HOST AUTHORITY: HP操作は一旦ローカルでやるが、生死フラグはホストかデバッグのみ決定 ---
     const now = performance.now();
     const lastHit = p === player1 ? p1LastHitTime : p2LastHitTime;
     if (now - lastHit < IFRAME_DURATION) return;
@@ -2148,26 +2151,25 @@ function damagePlayer(p, amount) {
         });
     }
 
-    // --- グレイモード拉致判定 ---
-    if (isGreyMode && (hpP1 <= 0 || hpP2 <= 0)) {
-        if (!abductionState.active) {
-            startAbductionSequence();
-            // 相手にも拉致開始を通知
-            if (conn && conn.open) {
-                conn.send({ type: 'ABDUCTION_START' });
+    // --- グレイモード拉致判定 (Host/Debug only) ---
+    if (isHost || isDebugMode) {
+        if (isGreyMode && (hpP1 <= 0 || hpP2 <= 0)) {
+            if (!abductionState.active) {
+                startAbductionSequence();
+                if (conn && conn.open) {
+                    conn.send({ type: 'ABDUCTION_START' });
+                }
             }
+            return; 
         }
-        return; // 通常の死亡処理はスキップ
-    }
 
-    if (hpP1 <= 0 || hpP2 <= 0) {
-        // 【修正】ゲームオーバー判定はホスト(またはデバッグ)権限に統一
-        if ((isHost || isDebugMode) && !isGameOver && !gameCleared) {
-            isGameOver = true; timerStopped = true;
-            player1.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
-            player2.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
-            
-            showResult();
+        if (hpP1 <= 0 || hpP2 <= 0) {
+            if (!isGameOver && !gameCleared) {
+                isGameOver = true; timerStopped = true;
+                player1.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
+                player2.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
+                showResult();
+            }
         }
     }
 } 
@@ -2204,7 +2206,9 @@ function movePlayer(p, dx, dy) {
         if (daughter.rescued && daughter.rescuer === (p === player1 ? 'p1' : 'p2')) {
             daughter.x = p.x; daughter.y = p.y;
         }
-        checkClear();
+        
+        // --- HOST AUTHORITY ---
+        if (isHost || isDebugMode) checkClear();
     }
 } 
 
@@ -2242,6 +2246,7 @@ function playerAttack(p) {
     });
     const other = p === player1 ? player2 : player1;
     if (isFriendlyFire && (p===player1?hpP2>0:hpP1>0) && other.x === tx && other.y === ty) { 
+        // FFダメージもHost Authorityだが、即時性を重視してダメージ計算関数内で分岐させる
         damagePlayer(other, 3); hit = true; 
     }
 
@@ -2268,17 +2273,14 @@ function checkClear() {
     const isP1Home = player1.y === startBottomY && (player1.x === startLeftX || player1.x === startRightX);
     const isP2Home = player2.y === startBottomY && (player2.x === startLeftX || player2.x === startRightX);
     
-    // 【修正】クリア判定はホスト(またはデバッグ)権限に統一
-    if (isHost || isDebugMode) {
-        if (foundDaughter && daughter.rescued && isP1Home && isP2Home && (!isGameOver || isDebugMode)) {
-            gameCleared = true; stopCurrentBgm();
-            if (!isGreyMode) {
-                clearBGM.currentTime = 0;
-                clearBGM.loop = true; 
-                clearBGM.play().catch(()=>{});
-            }
-            showResult();
+    if (foundDaughter && daughter.rescued && isP1Home && isP2Home && (!isGameOver || isDebugMode)) {
+        gameCleared = true; stopCurrentBgm();
+        if (!isGreyMode) {
+            clearBGM.currentTime = 0;
+            clearBGM.loop = true; 
+            clearBGM.play().catch(()=>{});
         }
+        showResult();
     }
 } 
 
@@ -3476,10 +3478,6 @@ function setupConnection() {
             }
         } else {
             if (data.type === 'SYNC') {
-                // --- 修正箇所：エッジ検出と強制死亡判定 ---
-                const prevGameOver = isGameOver;
-                const prevGameCleared = gameCleared;
-
                 player1.x = data.p1.x; player1.y = data.p1.y; player1.facing = data.p1.f; player1.stepCount = data.p1.sc;
                 player2.x = data.p2.x; player2.y = data.p2.y; player2.facing = data.p2.f; player2.stepCount = data.p2.sc;
                 hpP1 = data.hp.p1; hpP2 = data.hp.p2;
@@ -3506,8 +3504,8 @@ function setupConnection() {
                 
                 signalState = data.sig;
                 retreatState = data.ret;
-                continueState = data.cont;
-                returnState = data.rtrn;
+                continueState = data.cont; // 同期
+                returnState = data.rtrn;   // 同期
 
                 fixedTime = data.t;
                 gameCleared = data.cl;
@@ -3518,28 +3516,6 @@ function setupConnection() {
                 otherPlayerName = data.hn;
 
                 updateInputPosition();
-
-                // エッジ検出：フラグが切り替わった瞬間を検知
-                if (!prevGameOver && isGameOver) {
-                    timerStopped = true;
-                    showResult(); 
-                }
-                if (!prevGameCleared && gameCleared) {
-                    stopCurrentBgm(); 
-                    if (!isGreyMode) {
-                        clearBGM.currentTime = 0;
-                        clearBGM.loop = true; 
-                        clearBGM.play().catch(()=>{});
-                    }
-                    showResult(); 
-                }
-                
-                // ★【二重安全装置】HPが0なのにGame Overになっていない場合、強制的に死ぬ
-                if ((hpP1 <= 0 || hpP2 <= 0) && !isGameOver && !gameCleared) {
-                    isGameOver = true;
-                    timerStopped = true;
-                    showResult();
-                }
 
             } else if (data.type === 'START') {
                 startDungeonGame(false, { 
@@ -3552,11 +3528,11 @@ function setupConnection() {
                 
             } else if (data.type === 'SPAWN_EFFECT') {
                 if (data.kind === 'goblin') {
-                      attackEffects.push({
-                          x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
-                      });
-                      const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); 
-                      playSE(SE.goblinAttack, 0.7, 0.15, pitch);
+                       attackEffects.push({
+                           x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
+                       });
+                       const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); 
+                       playSE(SE.goblinAttack, 0.7, 0.15, pitch);
                 } else if (data.kind === 'player') {
                       attackEffects.push({
                           x: data.x, y: data.y, type: 'player', owner: data.owner, dir: data.dir, startTime: performance.now(), duration: 100
