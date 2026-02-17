@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.9.2 Fixed</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.9.3 Fixed</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -238,7 +238,7 @@ let isDraggingBGM = false;
 let isDraggingSE = false;
 let isDraggingBright = false; 
 
-const PEER_ID_PREFIX = 'gn_beta2_fixed_'; 
+const PEER_ID_PREFIX = 'gn_beta2_fixed_3_'; // Version bump
 let peer = null;
 let conn = null;
 let isMatching = false; 
@@ -309,9 +309,9 @@ const visionHoleCanvas = document.createElement('canvas');
 visionHoleCanvas.width = visionSize; visionHoleCanvas.height = visionSize;
 const vhCtx = visionHoleCanvas.getContext('2d');
 const vhGrad = vhCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
-vhGrad.addColorStop(0, "rgba(0,0,0,1)");                   
+vhGrad.addColorStop(0, "rgba(0,0,0,1)");                    
 vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");          
-vhGrad.addColorStop(1, "rgba(0,0,0,0)");                  
+vhGrad.addColorStop(1, "rgba(0,0,0,0)");                   
 vhCtx.fillStyle = vhGrad;
 vhCtx.beginPath(); vhCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); vhCtx.fill();
 
@@ -507,7 +507,7 @@ function startAbductionSequence() {
     playElectronicBlip(); 
 }
 
-// --- 通信途絶防止のため、updateループを構造改革 ---
+// --- 通信途絶防止・ゲスト完全端末化のため、updateループを構造改革 ---
 function update() {
     if (gameState === 'gate') {
         requestAnimationFrame(update);
@@ -590,7 +590,7 @@ function update() {
                  foundDaughter = true;
                  foundDaughterNotified = true;
                  enterRageBgm();
-                 goblins.forEach(g => { if(g.hp>0 && !isGreyMode) setGoblinState(g, STATE.RAGE, performance.now()); });
+                 // Host Only Logic Guarded later, but sound changes are local ok
                  updateInfoText();
             }
 
@@ -611,49 +611,57 @@ function update() {
                  }
             }
 
-            if (!isDebugMode) { 
-                if (isHost) {
-                    // ゲスト入力処理
-                    let processed = 0;
-                    while (guestInputQueue.length > 0 && processed < 5) {
-                        const input = guestInputQueue.shift();
-                        if (!gameCleared && !isGameOver) { // ゲーム中のみ反映
-                            if (input.type === 'MOVE') movePlayer(player2, input.dx, input.dy);
-                            else if (input.type === 'ATTACK') playerAttack(player2);
-                        }
-                        processed++;
+            if (isHost || isDebugMode) {
+                // --- HOST LOGIC ---
+                // ゲスト入力処理
+                let processed = 0;
+                while (guestInputQueue.length > 0 && processed < 5) {
+                    const input = guestInputQueue.shift();
+                    if (!gameCleared && !isGameOver) { // ゲーム中のみ反映
+                        if (input.type === 'MOVE') movePlayer(player2, input.dx, input.dy);
+                        else if (input.type === 'ATTACK') playerAttack(player2);
                     }
+                    processed++;
+                }
 
-                    // シグナル処理（クリア画面以外）
-                    if (signalState.active && signalState.p1 && signalState.p2 && !gameCleared) {
-                        if (!signalState.agreedTime) {
-                            signalState.agreedTime = performance.now(); 
-                        } else {
-                            if (performance.now() - signalState.agreedTime > 2000) {
-                                if (signalState.type === 'R') {
-                                    startDungeonGame(false); 
-                                } else if (signalState.type === 'W') {
-                                    if (conn && conn.open) conn.send({ type: 'GO_TITLE' });
-                                    location.reload();
-                                }
+                // シグナル処理（クリア画面以外）
+                if (signalState.active && signalState.p1 && signalState.p2 && !gameCleared) {
+                    if (!signalState.agreedTime) {
+                        signalState.agreedTime = performance.now(); 
+                    } else {
+                        if (performance.now() - signalState.agreedTime > 2000) {
+                            if (signalState.type === 'R') {
+                                startDungeonGame(false); 
+                            } else if (signalState.type === 'W') {
+                                if (conn && conn.open) conn.send({ type: 'GO_TITLE' });
+                                location.reload();
                             }
                         }
                     }
-                    
-                    // ゲームループ（AIなど）はゲーム中のみ
-                    if (!gameCleared && !isGameOver) {
-                        gameLoopStep(); 
-                    }
-                } else {
-                    // ゲストは自分のループ（予測等があればここ）
-                    gameLoopStep();
                 }
+                
+                // ゲームループ
+                if (!gameCleared && !isGameOver) {
+                    gameLoopStep(); 
+                }
+
             } else {
-                gameLoopStep(); // デバッグモード
+                // --- GUEST LOGIC (Dumb Terminal) ---
+                // Do NOT call gameLoopStep().
+                // Input is handled in keydown listeners -> conn.send
+                // State is handled in conn.on('SYNC')
             }
         } // End of !abductionState.active
 
-        // --- 3. 最重要: ホストによる定期同期 (NEVER STOP SENDING) ---
+        // --- 3. 視覚更新（共通） ---
+        // ミニマップは視覚情報のみなのでゲストも実行して良い（GridとGoblins配列に基づく）
+        const now = performance.now();
+        if (now - lastMinimapUpdate > MINIMAP_UPDATE_INTERVAL) {
+            updateMinimap();
+            lastMinimapUpdate = now;
+        }
+
+        // --- 4. 最重要: ホストによる定期同期 (NEVER STOP SENDING) ---
         // ゲームオーバーやクリア、拉致中であっても、状態をゲストに送り続ける
         if (isHost && conn && conn.open) {
             const now = performance.now();
@@ -674,7 +682,7 @@ function update() {
                     sig: signalState, 
                     ret: retreatState,
                     cont: continueState, 
-                    rtrn: returnState,   
+                    rtrn: returnState,    
                     t: (!timerStopped) ? (performance.now()/1000 - startTime) : fixedTime,
                     cl: gameCleared,
                     go: isGameOver,
@@ -1686,6 +1694,10 @@ function placeGoblins() {
 } 
 
 function gameLoopStep() {
+    // --- HOST AUTHORITY GUARD ---
+    // ゲストはいかなる場合もこの関数を実行してはならない
+    if (!isHost && !isDebugMode) return;
+
     const now = performance.now();
     goblins = goblins.filter(g => {
         if (!g.nextUpdate || now >= g.nextUpdate) {
@@ -1712,11 +1724,6 @@ function gameLoopStep() {
             return true; 
         });
     }
-    
-    if (now - lastMinimapUpdate > MINIMAP_UPDATE_INTERVAL) {
-        updateMinimap();
-        lastMinimapUpdate = now;
-    }
 } 
 
 function isAdjacent(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1; }
@@ -1725,7 +1732,7 @@ function updateGoblin(g, now) {
     if (g.state === STATE.DYING) {
         const elapsed = now - g.deathTime;
         const FADE_START_DELAY = 1500; 
-        const FADE_DURATION = 1000;           
+        const FADE_DURATION = 1000;            
 
         if (elapsed < 500) {
             g.deathAngle = (elapsed / 500) * (Math.PI / 2) * g.deathDir;
@@ -2226,31 +2233,36 @@ function playerAttack(p) {
     const tx = p.x + dx, ty = p.y + dy;
     let hit = false;
     
-    goblins.forEach(g => {
-        if (g.hp > 0 && g.x === tx && g.y === ty) {
-            if (isGreyMode && (g.state === STATE.CHARGE || g.state === STATE.REAPPEAR)) return;
-            
-            g.hp -= 3; hit = true;
-            if (!isGreyMode) {
-                const pitch = g.isGiant ? 0.4 : 1.0;
-                const vol = g.isGiant ? 0.8 * 1.2 : 0.8;
-                playSE(SE.goblinHit, vol, 0.1, pitch);
+    // --- HOST AUTHORITY: 敵へのダメージ処理はホストのみ ---
+    if (isHost || isDebugMode) {
+        goblins.forEach(g => {
+            if (g.hp > 0 && g.x === tx && g.y === ty) {
+                if (isGreyMode && (g.state === STATE.CHARGE || g.state === STATE.REAPPEAR)) return;
+                
+                g.hp -= 3; hit = true;
+                if (!isGreyMode) {
+                    const pitch = g.isGiant ? 0.4 : 1.0;
+                    const vol = g.isGiant ? 0.8 * 1.2 : 0.8;
+                    playSE(SE.goblinHit, vol, 0.1, pitch);
+                }
+                if (g.hp <= 0) { 
+                    g.state = STATE.DYING;
+                    g.targetPlayer = null;
+                    g.deathTime = now;
+                    g.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1; 
+                }
             }
-            if (g.hp <= 0) { 
-                g.state = STATE.DYING;
-                g.targetPlayer = null;
-                g.deathTime = now;
-                g.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1; 
-            }
+        });
+        const other = p === player1 ? player2 : player1;
+        if (isFriendlyFire && (p===player1?hpP2>0:hpP1>0) && other.x === tx && other.y === ty) { 
+            // FFダメージもHost Authorityだが、即時性を重視してダメージ計算関数内で分岐させる
+            damagePlayer(other, 3); hit = true; 
         }
-    });
-    const other = p === player1 ? player2 : player1;
-    if (isFriendlyFire && (p===player1?hpP2>0:hpP1>0) && other.x === tx && other.y === ty) { 
-        // FFダメージもHost Authorityだが、即時性を重視してダメージ計算関数内で分岐させる
-        damagePlayer(other, 3); hit = true; 
     }
 
-    const hitAnything = hit; 
+    // 効果音とエフェクトはゲストでも再生可能（同期ズレがあっても許容範囲）
+    // ただし、正確なヒット音はホストからしか来ないため、ここでは攻撃の空振り音/エフェクトを出す
+    const hitAnything = hit; // ゲストでは常にfalseになるが、SYNCで補正される
     playSE(p===player1 ? SE.playerAttack1 : SE.playerAttack2, hitAnything?0.8:0.5, 0.05);
     
     const ex = tx + 0.5 + (rnd.nextFloat()-0.5)*0.2;
@@ -3528,11 +3540,11 @@ function setupConnection() {
                 
             } else if (data.type === 'SPAWN_EFFECT') {
                 if (data.kind === 'goblin') {
-                       attackEffects.push({
+                        attackEffects.push({
                            x: data.x, y: data.y, type: 'goblin', dir: data.dir, startTime: performance.now(), duration: 120
-                       });
-                       const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); 
-                       playSE(SE.goblinAttack, 0.7, 0.15, pitch);
+                        });
+                        const pitch = isGreyMode ? 1.0 : (Math.random() > 0.8 ? 0.4 : 1.0); 
+                        playSE(SE.goblinAttack, 0.7, 0.15, pitch);
                 } else if (data.kind === 'player') {
                       attackEffects.push({
                           x: data.x, y: data.y, type: 'player', owner: data.owner, dir: data.dir, startTime: performance.now(), duration: 100
