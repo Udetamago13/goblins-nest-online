@@ -238,7 +238,7 @@ let isDraggingBGM = false;
 let isDraggingSE = false;
 let isDraggingBright = false; 
 
-const PEER_ID_PREFIX = 'gn_beta2_fixed_3_'; // Version bump
+const PEER_ID_PREFIX = 'gn_beta2_fixed_3_'; 
 let peer = null;
 let conn = null;
 let isMatching = false; 
@@ -2176,6 +2176,11 @@ function damagePlayer(p, amount) {
                 player1.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
                 player2.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
                 showResult();
+                
+                // 【重要修正】ここで強制的にゲームオーバー命令を送る
+                if (conn && conn.open) {
+                    conn.send({ type: 'GAME_OVER_TRIGGER' });
+                }
             }
         }
     }
@@ -3528,6 +3533,11 @@ function setupConnection() {
                 otherPlayerName = data.hn;
 
                 updateInputPosition();
+                
+                // 【重要修正】ここで強制的に即時表示チェックを入れる
+                if (isGameOver && document.getElementById('result-rank').style.display === 'none') {
+                    showResult();
+                }
 
             } else if (data.type === 'START') {
                 startDungeonGame(false, { 
@@ -3560,6 +3570,12 @@ function setupConnection() {
             } else if (data.type === 'ABDUCTION_START') {
                 if (!abductionState.active) {
                     startAbductionSequence();
+                }
+            } else if (data.type === 'GAME_OVER_TRIGGER') {
+                // 【重要修正】強制ゲームオーバー画面表示
+                isGameOver = true;
+                if (document.getElementById('result-rank').style.display === 'none') {
+                    showResult();
                 }
             }
         }
