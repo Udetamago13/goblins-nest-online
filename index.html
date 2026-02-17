@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.9.3 Fixed</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.9.4 UI Update</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -309,9 +309,9 @@ const visionHoleCanvas = document.createElement('canvas');
 visionHoleCanvas.width = visionSize; visionHoleCanvas.height = visionSize;
 const vhCtx = visionHoleCanvas.getContext('2d');
 const vhGrad = vhCtx.createRadialGradient(visionRadius, visionRadius, 0, visionRadius, visionRadius, visionRadius);
-vhGrad.addColorStop(0, "rgba(0,0,0,1)");                    
+vhGrad.addColorStop(0, "rgba(0,0,0,1)");                     
 vhGrad.addColorStop(0.5, "rgba(0,0,0,1)");          
-vhGrad.addColorStop(1, "rgba(0,0,0,0)");                   
+vhGrad.addColorStop(1, "rgba(0,0,0,0)");                    
 vhCtx.fillStyle = vhGrad;
 vhCtx.beginPath(); vhCtx.arc(visionRadius, visionRadius, visionRadius, 0, Math.PI*2); vhCtx.fill();
 
@@ -699,7 +699,6 @@ function update() {
     draw(); 
     requestAnimationFrame(update);
 } // --- update 終了 ---
-
 function updateInputPosition() {
     const rect = canvas.getBoundingClientRect();
     const scale = rect.width / VIRTUAL_WIDTH;
@@ -735,7 +734,11 @@ function updateInputPosition() {
         controlsHelpEl.innerText = "クリック/Enter: 開始";
     } else if (gameState === 'matching') {
         if (isConnected) {
-            controlsHelpEl.innerText = "クリック: 合流して開始！";
+            if (isHost) {
+                controlsHelpEl.innerText = "クリック: 合流開始！";
+            } else {
+                controlsHelpEl.innerText = "ホストの開始を待っています...";
+            }
         } else if (isMatching) {
             controlsHelpEl.innerText = "待機中... クリック: キャンセル (合言葉変更)";
         } else {
@@ -877,14 +880,27 @@ function drawMatchingScreen() {
     const DEBUG_BTN_CENTER_Y = VIRTUAL_HEIGHT - 80 + 20; 
     const FF_BTN_CENTER_Y = VIRTUAL_HEIGHT - 80 + 20;
 
+    // --- UI改修箇所: ホストとゲストでボタン表示を分ける ---
     if (isConnected) {
-        ctx.fillStyle = "#ff0000"; 
-        ctx.fillRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
-        ctx.strokeStyle = "#ffaaaa"; ctx.lineWidth = 4;
-        ctx.strokeRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
-        
-        ctx.fillStyle = "white";
-        ctx.font = "30px 'DotGothic16'"; ctx.fillText("合流", VIRTUAL_WIDTH / 2, BTN_CENTER_Y + TEXT_OFFSET_Y);
+        if (isHost) {
+            // ホスト: 「合流開始」（赤・押せる）
+            ctx.fillStyle = "#ff0000"; 
+            ctx.fillRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
+            ctx.strokeStyle = "#ffaaaa"; ctx.lineWidth = 4;
+            ctx.strokeRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
+            
+            ctx.fillStyle = "white";
+            ctx.font = "30px 'DotGothic16'"; ctx.fillText("合流開始", VIRTUAL_WIDTH / 2, BTN_CENTER_Y + TEXT_OFFSET_Y);
+        } else {
+            // ゲスト: 「合流待ち」（グレー/暗赤・押しても無反応）
+            ctx.fillStyle = "#550000"; 
+            ctx.fillRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
+            ctx.strokeStyle = "#773333"; ctx.lineWidth = 4;
+            ctx.strokeRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
+            
+            ctx.fillStyle = "#bbbbbb";
+            ctx.font = "30px 'DotGothic16'"; ctx.fillText("合流待ち", VIRTUAL_WIDTH / 2, BTN_CENTER_Y + TEXT_OFFSET_Y);
+        }
     } else if (isMatching) {
         if (Math.floor(Date.now() / 400) % 2 === 0) {
             ctx.strokeStyle = "#ffff00"; ctx.lineWidth = 4;
@@ -2992,7 +3008,7 @@ function renderFloorCanvas() {
     
     const grad = floorCtx.createLinearGradient(0, gradYStart, 0, gradYEnd);
     grad.addColorStop(0, isGreyMode ? "rgba(0, 255, 100, 0.8)" : "rgba(255, 255, 200, 0.8)"); 
-    grad.addColorStop(1, isGreyMode ? "rgba(0, 255, 100, 0)" : "rgba(255, 255, 200, 0)");            
+    grad.addColorStop(1, isGreyMode ? "rgba(0, 255, 100, 0)" : "rgba(255, 255, 200, 0)");             
     
     floorCtx.fillStyle = grad;
     floorCtx.fillRect(startLeftX*SCALED_TILE, gradYEnd, SCALED_TILE*2, SCALED_TILE*3);
@@ -3073,6 +3089,7 @@ function handleDown(e) {
                     playChurchBell(); 
                     startDungeonGame(false); 
                 } else {
+                    // --- UI改修箇所: ゲストはここを押しても何も起きない（待機状態） ---
                 }
             } else if (isMatching) {
                 isMatching = false;
@@ -3546,6 +3563,9 @@ function setupConnection() {
                 }
 
             } else if (data.type === 'START') {
+                // --- UI改修箇所: ゲスト側でも鐘を鳴らす ---
+                playChurchBell();
+                
                 startDungeonGame(false, { 
                     seed: data.seed, 
                     colorIdx: data.colorIdx, 
