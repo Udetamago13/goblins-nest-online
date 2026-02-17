@@ -2179,7 +2179,11 @@ function damagePlayer(p, amount) {
                 
                 // 【重要修正】ここで強制的にゲームオーバー命令を送る
                 if (conn && conn.open) {
-                    conn.send({ type: 'GAME_OVER_TRIGGER' });
+                    // 死んだプレイヤー情報を付加
+                    conn.send({ 
+                        type: 'GAME_OVER_TRIGGER',
+                        deadPlayer: (hpP1 <= 0 ? 'p1' : 'p2') 
+                    });
                 }
             }
         }
@@ -2316,7 +2320,8 @@ function showResult() {
         }
     }
 
-    if ((hpP1 <= 0 || hpP2 <= 0) && !gameCleared) {
+    // 【重要修正】フラグ優先でゲームオーバーを表示する（HP同期ズレ対策）
+    if ((isGameOver || hpP1 <= 0 || hpP2 <= 0) && !gameCleared) {
         document.getElementById('rank-grade').innerText = isGreyMode ? "Abducted" : "Game Over";
         document.getElementById('guild-comment').innerText = isGreyMode ? "生体サンプルの回収完了" : "死...";
         document.getElementById('rank-time').innerText = "";
@@ -2991,8 +2996,7 @@ function renderFloorCanvas() {
     floorCtx.fillRect(startLeftX*SCALED_TILE, gradYEnd, SCALED_TILE*2, SCALED_TILE*3);
     
     floorDrawn = true;
-} 
-
+}
 function updateMinimap() {
     const size = 180;
     if (minimapCanvas.width !== size) minimapCanvas.width = minimapCanvas.height = size;
@@ -3534,7 +3538,7 @@ function setupConnection() {
 
                 updateInputPosition();
                 
-                // 【重要修正】ここで強制的に即時表示チェックを入れる
+                // --- 修正箇所: ここでも即時判定を入れる ---
                 if (isGameOver && document.getElementById('result-rank').style.display === 'none') {
                     showResult();
                 }
@@ -3571,8 +3575,12 @@ function setupConnection() {
                 if (!abductionState.active) {
                     startAbductionSequence();
                 }
-            } else if (data.type === 'GAME_OVER_TRIGGER') {
-                // 【重要修正】強制ゲームオーバー画面表示
+            }
+            // --- 重要修正: ゲームオーバートリガー受信時のHP強制書き換え ---
+            else if (data.type === 'GAME_OVER_TRIGGER') {
+                if (data.deadPlayer === 'p1') hpP1 = 0;
+                else if (data.deadPlayer === 'p2') hpP2 = 0;
+                
                 isGameOver = true;
                 if (document.getElementById('result-rank').style.display === 'none') {
                     showResult();
