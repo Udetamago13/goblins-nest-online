@@ -238,7 +238,7 @@ let isDraggingBGM = false;
 let isDraggingSE = false;
 let isDraggingBright = false; 
 
-const PEER_ID_PREFIX = 'gn_beta2_fixed_3_'; 
+const PEER_ID_PREFIX = 'gn_beta2_fixed_4_'; 
 let peer = null;
 let conn = null;
 let isMatching = false; 
@@ -2294,7 +2294,8 @@ function checkClear() {
     const isP1Home = player1.y === startBottomY && (player1.x === startLeftX || player1.x === startRightX);
     const isP2Home = player2.y === startBottomY && (player2.x === startLeftX || player2.x === startRightX);
     
-    if (foundDaughter && daughter.rescued && isP1Home && isP2Home && (!isGameOver || isDebugMode)) {
+    // 【重要修正】HPが0でないことをクリア条件に追加（即時判定）
+    if (foundDaughter && daughter.rescued && isP1Home && isP2Home && hpP1 > 0 && hpP2 > 0 && (!isGameOver || isDebugMode)) {
         gameCleared = true; stopCurrentBgm();
         if (!isGreyMode) {
             clearBGM.currentTime = 0;
@@ -2321,7 +2322,8 @@ function showResult() {
     }
 
     // 【重要修正】フラグ優先でゲームオーバーを表示する（HP同期ズレ対策）
-    if ((isGameOver || hpP1 <= 0 || hpP2 <= 0) && !gameCleared) {
+    // gameClearedの判定を除外。HPが0なら問答無用でGame Over。
+    if ((isGameOver || hpP1 <= 0 || hpP2 <= 0)) {
         document.getElementById('rank-grade').innerText = isGreyMode ? "Abducted" : "Game Over";
         document.getElementById('guild-comment').innerText = isGreyMode ? "生体サンプルの回収完了" : "死...";
         document.getElementById('rank-time').innerText = "";
