@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.9.5 Debug Fix</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.9.6 Wanderer Update</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -399,7 +399,8 @@ Object.values(SE).flat().forEach(audio => { audio.preload = 'auto'; });
 let grid = [], floorVariant = [];
 let player1 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0, deathDir: 0};
 let player2 = {x: 0, y: 0, facing: 1, hitShakeTime: 0, stepCount: 0, deathDir: 0};
-let daughter = {x: 0, y: 0, rescued: false, rescuer: null};
+// 【追加】 isWanderer フラグを初期化
+let daughter = {x: 0, y: 0, rescued: false, rescuer: null, isWanderer: false};
 let healingBiscuit = {x: -1, y: -1, active: false};
 let goblins = [];
 let rooms = [];
@@ -1544,6 +1545,10 @@ function applySmoothing() {
 
 function placeBiscuitSafely() {
     healingBiscuit.active = false;
+    
+    // 【追加】娘が自力脱出中（1%ランダム）の場合はビスケットを出さない
+    if (daughter.isWanderer) return; 
+
     let candidates = [
         {dx:0, dy:1}, 
         {dx:1, dy:0}, 
@@ -1621,6 +1626,9 @@ function generateDungeon() {
         }
     }
 
+    // --- 追加：初期化 ---
+    daughter.rescued = false; daughter.rescuer = null; daughter.isWanderer = false;
+    
     placeDaughter();
     addObstaclesToRooms();
     applySmoothing();
@@ -1633,7 +1641,6 @@ function generateDungeon() {
 
     startTime = performance.now() / 1000;
     fixedTime = 0; timerStopped = false; foundDaughter = false; foundDaughterNotified = false; gameCleared = false; isGameOver = false;
-    daughter.rescued = false; daughter.rescuer = null;
     hpP1 = 10; hpP2 = 10;
     document.getElementById('result-rank').style.display = 'none';
     document.getElementById('restart-hint').innerText = ""; 
@@ -1664,15 +1671,39 @@ function carveCorridor(startX, startY, dirIdx, length, width) {
 }
 
 function placeDaughter() {
-    const sortedRooms = [...rooms].sort((a, b) => a.y - b.y);
-    let targetRoom = sortedRooms.length >= 3 ? sortedRooms[Math.floor(rnd.nextFloat() * 2)] : sortedRooms[0]; 
-    let candidates = [];
-    for (let dy = 0; dy < targetRoom.h; dy++) for (let dx = 0; dx < targetRoom.w; dx++) {
-        const px = targetRoom.x + dx, py = targetRoom.y + dy;
-        if (grid[py][px] === 1) candidates.push({x: px, y: py});
+    // 【追加】 1%の確率で完全ランダム配置（自力脱出中ギミック）
+    if (rnd.nextFloat() < 0.01) {
+        daughter.isWanderer = true;
+        let validTiles = [];
+        for (let y = 0; y < GRID_H; y++) {
+            for (let x = 0; x < GRID_W; x++) {
+                if (grid[y][x] === 1) {
+                    // 除外: プレイヤーのスタート位置
+                    if (y === startBottomY && (x === startLeftX || x === startRightX)) continue;
+                    validTiles.push({x: x, y: y});
+                }
+            }
+        }
+        if (validTiles.length > 0) {
+            const pos = validTiles[Math.floor(rnd.nextFloat() * validTiles.length)];
+            daughter.x = pos.x; daughter.y = pos.y;
+        } else {
+            daughter.x = startLeftX; daughter.y = startBottomY - 1; // 念のためのフォールバック
+        }
+    } else {
+        // 通常配置（99%）
+        daughter.isWanderer = false;
+        const sortedRooms = [...rooms].sort((a, b) => a.y - b.y);
+        let targetRoom = sortedRooms.length >= 3 ? sortedRooms[Math.floor(rnd.nextFloat() * 2)] : sortedRooms[0]; 
+        let candidates = [];
+        for (let dy = 0; dy < targetRoom.h; dy++) for (let dx = 0; dx < targetRoom.w; dx++) {
+            const px = targetRoom.x + dx, py = targetRoom.y + dy;
+            if (grid[py][px] === 1) candidates.push({x: px, y: py});
+        }
+        const pos = candidates[Math.floor(rnd.nextFloat() * candidates.length)] || {x: targetRoom.x+1, y: targetRoom.y+1}; 
+        daughter.x = pos.x; daughter.y = pos.y;
     }
-    const pos = candidates[Math.floor(rnd.nextFloat() * candidates.length)] || {x: targetRoom.x+1, y: targetRoom.y+1}; 
-    daughter.x = pos.x; daughter.y = pos.y;
+    
     distanceToDaughter = (GRID_H - 1) - daughter.y;
 }
 
