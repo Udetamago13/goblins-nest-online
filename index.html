@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ゴブリンの巣穴 Online Ver.Beta 2.9.4 UI Update</title>
+    <title>ゴブリンの巣穴 Online Ver.Beta 2.9.5 Debug Fix</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
     <style>
@@ -2187,19 +2187,22 @@ function damagePlayer(p, amount) {
         }
 
         if (hpP1 <= 0 || hpP2 <= 0) {
-            if (!isGameOver && !gameCleared) {
-                isGameOver = true; timerStopped = true;
-                player1.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
-                player2.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
-                showResult();
-                
-                // 【重要修正】ここで強制的にゲームオーバー命令を送る
-                if (conn && conn.open) {
-                    // 死んだプレイヤー情報を付加
-                    conn.send({ 
-                        type: 'GAME_OVER_TRIGGER',
-                        deadPlayer: (hpP1 <= 0 ? 'p1' : 'p2') 
-                    });
+            // 【修正箇所①】予演モード（通常）ならゲームオーバー処理をスキップするバイパス
+            if (isDebugMode && !isGreyMode) {
+                // デバッグモード（通常）では死なずに操作続行可能とするため何もしない
+            } else {
+                if (!isGameOver && !gameCleared) {
+                    isGameOver = true; timerStopped = true;
+                    player1.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
+                    player2.deathDir = rnd.nextFloat() < 0.5 ? 1 : -1;
+                    showResult();
+                    
+                    if (conn && conn.open) {
+                        conn.send({ 
+                            type: 'GAME_OVER_TRIGGER',
+                            deadPlayer: (hpP1 <= 0 ? 'p1' : 'p2') 
+                        });
+                    }
                 }
             }
         }
@@ -2310,8 +2313,10 @@ function checkClear() {
     const isP1Home = player1.y === startBottomY && (player1.x === startLeftX || player1.x === startRightX);
     const isP2Home = player2.y === startBottomY && (player2.x === startLeftX || player2.x === startRightX);
     
-    // 【重要修正】HPが0でないことをクリア条件に追加（即時判定）
-    if (foundDaughter && daughter.rescued && isP1Home && isP2Home && hpP1 > 0 && hpP2 > 0 && (!isGameOver || isDebugMode)) {
+    // 【修正箇所②】デバッグモードならHPが0でもクリア条件を満たすようにバイパス
+    const isHpOk = (hpP1 > 0 && hpP2 > 0) || isDebugMode;
+    
+    if (foundDaughter && daughter.rescued && isP1Home && isP2Home && isHpOk && (!isGameOver || isDebugMode)) {
         gameCleared = true; stopCurrentBgm();
         if (!isGreyMode) {
             clearBGM.currentTime = 0;
@@ -2337,9 +2342,10 @@ function showResult() {
         }
     }
 
-    // 【重要修正】フラグ優先でゲームオーバーを表示する（HP同期ズレ対策）
-    // gameClearedの判定を除外。HPが0なら問答無用でGame Over。
-    if ((isGameOver || hpP1 <= 0 || hpP2 <= 0)) {
+    // 【修正箇所③】予演モードでクリア済みの場合はゲームオーバー画面を出さない
+    const isDebugCleared = isDebugMode && gameCleared;
+
+    if ((isGameOver || hpP1 <= 0 || hpP2 <= 0) && !isDebugCleared) {
         document.getElementById('rank-grade').innerText = isGreyMode ? "Abducted" : "Game Over";
         document.getElementById('guild-comment').innerText = isGreyMode ? "生体サンプルの回収完了" : "死...";
         document.getElementById('rank-time').innerText = "";
@@ -2509,6 +2515,7 @@ function drawGameScreen() {
         let img = playerImages.front;
         let sx = 1;
         
+        // デバッグモード時はHPが0でも倒れグラフィックにならない（通常通り動ける）
         if (isDead && !isDebugMode) {
              let rot = (Math.PI / 2) * (p.deathDir || 1); 
              ctx.save();
