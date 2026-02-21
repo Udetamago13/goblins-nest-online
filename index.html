@@ -85,7 +85,7 @@
             position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
             color: #fff; font-size: 28px; background: rgba(0,0,0,0.9); padding: 40px 60px;
             border-radius: 30px; display: none; text-align: center; line-height: 1.8;
-            width: 80%; box-shadow: 0 0 30px #0ff; 
+            width: 80%; min-height: 280px; box-shadow: 0 0 30px #0ff; 
             pointer-events: none;
             z-index: 20;
         }
@@ -880,10 +880,8 @@ function drawMatchingScreen() {
     const DEBUG_BTN_CENTER_Y = VIRTUAL_HEIGHT - 80 + 20; 
     const FF_BTN_CENTER_Y = VIRTUAL_HEIGHT - 80 + 20;
 
-    // --- UI改修箇所: ホストとゲストでボタン表示を分ける ---
     if (isConnected) {
         if (isHost) {
-            // ホスト: 「合流開始」（赤・押せる）
             ctx.fillStyle = "#ff0000"; 
             ctx.fillRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
             ctx.strokeStyle = "#ffaaaa"; ctx.lineWidth = 4;
@@ -892,7 +890,6 @@ function drawMatchingScreen() {
             ctx.fillStyle = "white";
             ctx.font = "30px 'DotGothic16'"; ctx.fillText("合流開始", VIRTUAL_WIDTH / 2, BTN_CENTER_Y + TEXT_OFFSET_Y);
         } else {
-            // ゲスト: 「合流待ち」（グレー/暗赤・押しても無反応）
             ctx.fillStyle = "#550000"; 
             ctx.fillRect(VIRTUAL_WIDTH/2 - 80, 440, 160, 60);
             ctx.strokeStyle = "#773333"; ctx.lineWidth = 4;
@@ -929,7 +926,7 @@ function drawMatchingScreen() {
         ctx.strokeRect(VIRTUAL_WIDTH - 150, VIRTUAL_HEIGHT - 80, 100, 40);
         ctx.font = "20px 'DotGothic16'"; ctx.fillText("予演", VIRTUAL_WIDTH - 100, DEBUG_BTN_CENTER_Y + TEXT_OFFSET_Y); 
         
-        // FF設定ボタン（左下）
+        // FF設定ボタン
         ctx.lineWidth = 2;
         ctx.strokeRect(50, VIRTUAL_HEIGHT - 80, 140, 40);
         if (isFriendlyFire) {
@@ -2856,12 +2853,16 @@ function drawHeartsUI() {
         // 再起ボタン (左下)
         const contX = 40;
         const contCenterX = contX + btnW/2;
+        ctx.fillStyle = "rgba(0, 0, 0, 0.8)"; // 修正: 背景色追加
+        ctx.fillRect(contX, btnY, btnW, btnH);
         ctx.strokeStyle = "#ffffff"; ctx.strokeRect(contX, btnY, btnW, btnH);
         ctx.fillStyle = "#ffffff"; ctx.fillText("再起", contCenterX, btnCenterY + TEXT_OFFSET_Y);
 
         // 帰還ボタン (右下)
         const retX = VIRTUAL_WIDTH - 180;
         const retCenterX = retX + btnW/2;
+        ctx.fillStyle = "rgba(0, 0, 0, 0.8)"; // 修正: 背景色追加
+        ctx.fillRect(retX, btnY, btnW, btnH);
         ctx.strokeStyle = "#ffffff"; ctx.strokeRect(retX, btnY, btnW, btnH);
         ctx.fillStyle = "#ffffff"; ctx.fillText("帰還", retCenterX, btnCenterY + TEXT_OFFSET_Y);
     }
