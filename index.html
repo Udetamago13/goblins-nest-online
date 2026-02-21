@@ -73,20 +73,12 @@
             padding: 10px; background: rgba(0,0,0,0.7); border-radius: 8px; line-height: 1.6; 
             display: none; white-space: pre-wrap;
         }
-        #signal-message {
-            position: absolute; top: 35%; left: 50%; transform: translate(-50%, -50%);
-            color: #ff0; font-size: 28px; text-shadow: 1px 1px 0 #000;
-            opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 30;
-            background: rgba(0,0,0,0.6); padding: 10px 30px; border-radius: 15px; 
-            border: 2px solid rgba(255,255,255,0.5);
-            letter-spacing: 2px; text-align: center; white-space: pre-wrap;
-        }
         #result-rank {
             position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
             color: #fff; font-size: 28px; background: rgba(0,0,0,0.9); padding: 40px 60px;
             border-radius: 30px; display: none; text-align: center; line-height: 1.8;
             width: 80%; box-shadow: 0 0 30px #0ff; 
-            pointer-events: none; 
+            pointer-events: none;
             z-index: 20;
         }
         #controls-help {
@@ -110,12 +102,11 @@
 
         <div id="ui-layer">
             <div id="info-panel"></div>
-            <div id="signal-message"></div>
             <div id="result-rank">
                 <div id="guild-comment"></div>
                 <div id="rank-grade" style="font-size: 60px; color: #ff0; margin: 10px 0;"></div>
                 <div id="rank-time" style="font-size:20px; margin:20px 0;"></div>
-                <div id="restart-hint" style="font-size:16px; color:#aaa; margin-top:20px; display:none;"></div>
+                <div id="restart-hint" style="font-size:16px; color:#aaa; margin-top:20px;"></div>
             </div>
         </div>
     </div>
@@ -196,7 +187,6 @@ const nameEl = document.getElementById('nameInput');
 const passEl = document.getElementById('passInput');
 const uiLayer = document.getElementById('ui-layer');
 const infoPanel = document.getElementById('info-panel');
-const signalMsgEl = document.getElementById('signal-message');
 const controlsHelpEl = document.getElementById('controls-help');
 
 const gateScreen = document.getElementById('gate-screen');
@@ -257,8 +247,7 @@ let isDebugMode = false;
 let psychicArrays = []; 
 let currentBgmDebugName = ""; 
 
-let currentFloorData = null; // 再起用の階層データ保持
-
+// --- 拉致演出用ステート ---
 let abductionState = {
     active: false,
     startTime: 0,
@@ -433,6 +422,7 @@ let retreatState = {
     confirmed: false
 };
 
+// --- クリア・ゲームオーバー画面用ステート（排他制御用） ---
 let continueState = {
     active: false,
     proposer: null,
@@ -496,7 +486,7 @@ function startAbductionSequence() {
     abductionState.resetDone = false;
     playElectronicBlip(); 
 }
-
+// --- 通信途絶防止・ゲスト完全端末化のため、updateループを構造改革 ---
 function update() {
     if (gameState === 'gate') {
         requestAnimationFrame(update);
@@ -536,14 +526,17 @@ function update() {
     updateInputPosition(); 
     
     if (gameState === 'game') {
+        // --- ゲスト側: 強制同期（状態監視） ---
         if (!isHost && !isDebugMode) {
             if ((isGameOver || gameCleared) && document.getElementById('result-rank').style.display === 'none') {
                 showResult();
             }
         }
 
+        // --- 1. 特殊演出（拉致）の進行 ---
         if (abductionState.active) {
             const elapsed = (performance.now() - abductionState.startTime) / 1000;
+            
             if (elapsed >= 1.0 && !abductionState.resetDone) {
                 if (isHost || !isConnected) {
                     startDungeonGame(isDebugMode);
@@ -552,11 +545,13 @@ function update() {
                 }
                 abductionState.resetDone = true;
             }
+
             if (elapsed >= 5.0) {
                 abductionState.active = false;
             }
         }
 
+        // --- 2. 通常ゲームロジック ---
         if (!abductionState.active) {
             if (!foundDaughterNotified && daughter.rescued) {
                  foundDaughter = true;
@@ -565,14 +560,11 @@ function update() {
                  updateInfoText();
             }
 
+            // クリア・ゲームオーバー画面の続行(再起)・帰還ロジック
             if ((gameCleared || isGameOver) && !isDebugMode) {
                  if (continueState.confirmed) {
                      if (performance.now() - continueState.confirmTime > 1500) {
-                          if (isGameOver) {
-                              startDungeonGame(false, currentFloorData, true);
-                          } else {
-                              startDungeonGame(false);
-                          }
+                          startDungeonGame(false);
                           continueState.confirmed = false;
                           continueState.active = false;
                           continueState.proposer = null;
@@ -586,6 +578,7 @@ function update() {
             }
 
             if (isHost || isDebugMode) {
+                // --- HOST LOGIC ---
                 let processed = 0;
                 while (guestInputQueue.length > 0 && processed < 5) {
                     const input = guestInputQueue.shift();
@@ -595,19 +588,24 @@ function update() {
                     }
                     processed++;
                 }
-                
+
                 if (!gameCleared && !isGameOver) {
                     gameLoopStep(); 
                 }
+
+            } else {
+                // --- GUEST LOGIC (Dumb Terminal) ---
             }
         }
 
+        // --- 3. 視覚更新（共通） ---
         const now = performance.now();
         if (now - lastMinimapUpdate > MINIMAP_UPDATE_INTERVAL) {
             updateMinimap();
             lastMinimapUpdate = now;
         }
 
+        // --- 4. 最重要: ホストによる定期同期 (NEVER STOP SENDING) ---
         if (isHost && conn && conn.open) {
             if (now - lastSyncTime > SYNC_INTERVAL) {
                 const state = {
@@ -641,7 +639,7 @@ function update() {
 
     draw(); 
     requestAnimationFrame(update);
-} 
+}
 
 function updateInputPosition() {
     const rect = canvas.getBoundingClientRect();
@@ -706,6 +704,7 @@ function draw() {
     if (gameState === 'game') {
         drawGameScreen();
         
+        // --- 拉致演出描画レイヤー ---
         if (abductionState.active) {
             drawAbductionEffect();
         }
@@ -1245,15 +1244,13 @@ function calculateShortestPath() {
     return distanceToDaughter * 1.5; 
 } 
 
-function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null, isRetry = false) {
+function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null) {
     isDebugMode = debugFlag; 
     guestInputQueue = []; 
 
-    // --- ステートのリセット ---
     continueState = { active: false, proposer: null, confirmed: false, confirmTime: 0 };
     returnState = { active: false, proposer: null, confirmed: false, confirmTime: 0 };
     retreatState = { active: false, proposer: null, confirmed: false };
-    signalMsgEl.style.opacity = 0;
 
     const prefix = isDebugMode ? S_KEY_PREFIX_DEBUG : S_KEY_PREFIX_REAL;
     
@@ -1268,32 +1265,24 @@ function startDungeonGame(debugFlag = isDebugMode, hostOverrideData = null, isRe
         selectedNormalIdx = hostOverrideData.normalIdx;
         selectedRageIdx = hostOverrideData.rageIdx;
         playCount = hostOverrideData.playCount; 
+        
     } else {
         initDecks(prefix);
+        
         if (currentDeckIndex >= 56) {
              generateNewDeck(prefix);
         }
 
         seedVal = Math.floor(Math.random() * 4294967296) + Date.now();
+
         selectedColorIdx = deckColorIndices[currentDeckIndex];
         selectedNormalIdx = deckNormalIndices[currentDeckIndex];
         selectedRageIdx = deckRageIndices[currentDeckIndex];
         
-        if (!isRetry) {
-            currentDeckIndex++;
-            playCount++;
-            saveSessionData(prefix); 
-        }
+        currentDeckIndex++;
+        playCount++;
+        saveSessionData(prefix); 
     }
-
-    // --- 【追加】ホスト用の再起データ保存 ---
-    currentFloorData = {
-        seed: seedVal,
-        colorIdx: selectedColorIdx,
-        normalIdx: selectedNormalIdx,
-        rageIdx: selectedRageIdx,
-        playCount: playCount
-    };
 
     rnd = new Xorshift(seedVal);
     currentStageColor = FLOOR_COLORS_56[selectedColorIdx];
@@ -1581,7 +1570,7 @@ function generateDungeon() {
     fixedTime = 0; timerStopped = false; foundDaughter = false; foundDaughterNotified = false; gameCleared = false; isGameOver = false;
     hpP1 = 10; hpP2 = 10;
     document.getElementById('result-rank').style.display = 'none';
-    document.getElementById('restart-hint').style.display = 'none'; 
+    document.getElementById('restart-hint').innerText = ""; 
     
     updateInfoText();
     playNormalBgm();
@@ -1673,10 +1662,9 @@ function placeGoblins() {
             deathTime: 0, deathDir: 0, deathAngle: 0, dissolveProgress: 0
         });
     }
-}
+} 
+
 function gameLoopStep() {
-    // --- HOST AUTHORITY GUARD ---
-    // ゲストはいかなる場合もこの関数を実行してはならない
     if (!isHost && !isDebugMode) return;
 
     const now = performance.now();
@@ -2121,7 +2109,6 @@ function tryGoblinAttack(g, target, now) {
 } 
 
 function damagePlayer(p, amount) {
-    // --- HOST AUTHORITY: HP操作は一旦ローカルでやるが、生死フラグはホストかデバッグのみ決定 ---
     const now = performance.now();
     const lastHit = p === player1 ? p1LastHitTime : p2LastHitTime;
     if (now - lastHit < IFRAME_DURATION) return;
@@ -2152,7 +2139,7 @@ function damagePlayer(p, amount) {
 
         if (hpP1 <= 0 || hpP2 <= 0) {
             if (isDebugMode && !isGreyMode) {
-                // デバッグモード（通常）では死なずに操作続行可能とするため何もしない
+                // デバッグ時は何もしない
             } else {
                 if (!isGameOver && !gameCleared) {
                     isGameOver = true; timerStopped = true;
@@ -2173,7 +2160,7 @@ function damagePlayer(p, amount) {
 } 
 
 function movePlayer(p, dx, dy) {
-    if (abductionState.active) return; // 拉致中は移動不可
+    if (abductionState.active) return;
     if (!isDebugMode && (isGameOver || gameCleared)) return;
 
     if (dx === 0 && dy === -1) p.facing = 0;
@@ -2205,13 +2192,12 @@ function movePlayer(p, dx, dy) {
             daughter.x = p.x; daughter.y = p.y;
         }
         
-        // --- HOST AUTHORITY ---
         if (isHost || isDebugMode) checkClear();
     }
 } 
 
 function playerAttack(p) {
-    if (abductionState.active) return; // 拉致中は攻撃不可
+    if (abductionState.active) return; 
     if (!isDebugMode && daughter.rescued && daughter.rescuer === (p === player1 ? 'p1' : 'p2')) return;
     if (!isDebugMode && (isGameOver || gameCleared)) return;
 
@@ -2224,7 +2210,6 @@ function playerAttack(p) {
     const tx = p.x + dx, ty = p.y + dy;
     let hit = false;
     
-    // --- HOST AUTHORITY: 敵へのダメージ処理はホストのみ ---
     if (isHost || isDebugMode) {
         goblins.forEach(g => {
             if (g.hp > 0 && g.x === tx && g.y === ty) {
@@ -2291,12 +2276,10 @@ function showResult() {
     rankEl.style.display = 'block';
     
     const restartHint = document.getElementById('restart-hint');
-    // UIをCanvasに完全統合したため、HTML側のヒントテキストはデバッグ以外非表示にする
     if (isDebugMode) {
-         restartHint.style.display = 'block';
-         restartHint.innerHTML = "(R: 次のダンジョン)";
+         restartHint.innerHTML = "(R: 次のダンジョン / 再起)";
     } else {
-         restartHint.style.display = 'none'; 
+         restartHint.innerHTML = ""; 
     }
 
     const isDebugCleared = isDebugMode && gameCleared;
@@ -2332,8 +2315,7 @@ function showResult() {
     document.getElementById('rank-grade').innerText = rank;
     document.getElementById('guild-comment').innerText = comment;
     document.getElementById('rank-time').innerText = `Time: ${fixedTime.toFixed(2)}s`;
-} 
-
+}
 function drawGameScreen() {
     ctx.fillStyle = "#111"; ctx.fillRect(0,0,VIRTUAL_WIDTH,VIRTUAL_HEIGHT);
     
@@ -2591,8 +2573,7 @@ function drawGameScreen() {
     }
     drawHeartsUI();
     
-    // UIを統合したため、signalMsgElは非表示にする（使わない）
-    signalMsgEl.style.opacity = 0;
+    const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
 } 
 
 function drawAnalogClock() {
@@ -2723,21 +2704,20 @@ function drawHeartsUI() {
     const btnCenterY = btnY + btnH/2;
     const TEXT_OFFSET_Y = -4;
 
-    // --- クリア画面・ゲームオーバー画面のボタン描画 ---
-    if ((gameCleared || effectiveGameOver) && !isDebugMode) {
+    // --- クリア・ゲームオーバー画面のボタン描画 ---
+    if ((gameCleared || effectiveGameOver) && !isDebugMode && !abductionState.active) {
         const isMe = isHost ? 'p1' : 'p2';
         
         // --- 続行/再起ボタン (左下: x=40) ---
         const contX = 40;
         const contCenterX = contX + btnW/2;
-        let baseContLabel = effectiveGameOver ? "再起" : "続行";
-        let contLabel = baseContLabel;
+        let contLabel = gameCleared ? "続行" : "再起";
         let contBg = "";
         let contStroke = "#ffffff";
         let contTextCol = "#ffffff";
 
         if (continueState.confirmed) {
-            contBg = "#ff0000"; contLabel = baseContLabel; 
+            contBg = "#ff0000"; contLabel = gameCleared ? "続行" : "再起"; 
         } else if (continueState.active) {
             const blink = Math.floor(Date.now() / 200) % 2 === 0;
             if (blink) {
@@ -2755,17 +2735,16 @@ function drawHeartsUI() {
         ctx.strokeStyle = contStroke; ctx.strokeRect(contX, btnY, btnW, btnH);
         ctx.fillStyle = contTextCol; ctx.fillText(contLabel, contCenterX, btnCenterY + TEXT_OFFSET_Y);
 
-        // --- 帰還/撤退ボタン (右下: x=VIRTUAL_WIDTH - 180) ---
+        // --- 帰還ボタン (右下: x=VIRTUAL_WIDTH - 180) ---
         const retX = VIRTUAL_WIDTH - 180;
         const retCenterX = retX + btnW/2;
-        let baseRetLabel = effectiveGameOver ? "撤退" : "帰還";
-        let retLabel = baseRetLabel;
+        let retLabel = "帰還";
         let retBg = "";
         let retStroke = "#ffffff";
         let retTextCol = "#ffffff";
 
         if (returnState.confirmed) {
-            retBg = "#ff0000"; retLabel = baseRetLabel;
+            retBg = "#ff0000"; retLabel = "帰還";
         } else if (returnState.active) {
             const blink = Math.floor(Date.now() / 200) % 2 === 0;
             if (blink) {
@@ -2942,7 +2921,6 @@ function renderFloorCanvas() {
     
     floorDrawn = true;
 }
-
 function updateMinimap() {
     const size = 180;
     if (minimapCanvas.width !== size) minimapCanvas.width = minimapCanvas.height = size;
@@ -3016,8 +2994,6 @@ function handleDown(e) {
                 if (isHost) {
                     playChurchBell(); 
                     startDungeonGame(false); 
-                } else {
-                    // ゲストはここを押しても何も起きない（待機状態）
                 }
             } else if (isMatching) {
                 isMatching = false;
@@ -3050,9 +3026,9 @@ function handleDown(e) {
     else if (gameState === 'game') {
         const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
         
-        // --- クリア画面・ゲームオーバー画面の入力処理 ---
-        if ((gameCleared || effectiveGameOver) && !isDebugMode) {
-            if (continueState.confirmed || returnState.confirmed) return; // 確定後は操作不能
+        // --- クリア・ゲームオーバー画面の入力処理 ---
+        if ((gameCleared || effectiveGameOver) && !isDebugMode && !abductionState.active) {
+            if (continueState.confirmed || returnState.confirmed) return;
 
             const isMe = isHost ? 'p1' : 'p2';
             const btnW = 140, btnH = 40, btnY = VIRTUAL_HEIGHT - 80;
@@ -3060,7 +3036,6 @@ function handleDown(e) {
 
             // 続行/再起ボタン
             if (pos.x >= contX && pos.x <= contX + btnW && pos.y >= btnY && pos.y <= btnY + btnH) {
-                // 排他制御: 帰還提案中ならキャンセル
                 if (returnState.proposer === isMe) {
                     returnState.active = false;
                     returnState.proposer = null;
@@ -3068,32 +3043,28 @@ function handleDown(e) {
                 }
 
                 if (!continueState.active) {
-                    // 新規提案
                     continueState.active = true;
                     continueState.proposer = isMe;
                     if (conn && conn.open) conn.send({ type: 'CONTINUE_UPDATE', active: true, proposer: isMe });
                 } else {
                     if (continueState.proposer === isMe) {
-                        // 自分の提案を解除
                         continueState.active = false;
                         continueState.proposer = null;
                         if (conn && conn.open) conn.send({ type: 'CONTINUE_UPDATE', active: false, proposer: null });
                     } else {
-                        // 相手の提案を受諾（確定）
                         continueState.confirmed = true;
                         continueState.confirmTime = performance.now();
                         playFanfare();
                         if (conn && conn.open) conn.send({ type: 'CONTINUE_CONFIRM' });
-                        return; // 音は鳴らさない（ファンファーレ優先）
+                        return;
                     }
                 }
-                playSignalSound('R'); // 音は毎回鳴らす
+                playSignalSound('R'); 
                 return;
             }
 
-            // 帰還/撤退ボタン
+            // 帰還ボタン
             if (pos.x >= retX && pos.x <= retX + btnW && pos.y >= btnY && pos.y <= btnY + btnH) {
-                // 排他制御: 続行提案中ならキャンセル
                 if (continueState.proposer === isMe) {
                     continueState.active = false;
                     continueState.proposer = null;
@@ -3110,7 +3081,6 @@ function handleDown(e) {
                         returnState.proposer = null;
                         if (conn && conn.open) conn.send({ type: 'RETURN_UPDATE', active: false, proposer: null });
                     } else {
-                        // 相手の提案を受諾（確定）
                         returnState.confirmed = true;
                         returnState.confirmTime = performance.now();
                         playFanfare();
@@ -3118,7 +3088,7 @@ function handleDown(e) {
                         return;
                     }
                 }
-                playSignalSound('W'); // 音は毎回鳴らす
+                playSignalSound('W'); 
                 return;
             }
             return;
@@ -3224,7 +3194,7 @@ window.addEventListener('keydown', (e) => {
     if (gameState === 'game') {
         const effectiveGameOver = isGameOver || (hpP1 <= 0 || hpP2 <= 0);
 
-        // キーボード操作はデバッグ時のリスタートのみ残し、本編の再起/撤退操作は廃止
+        // 予演モード専用のリセットショートカット
         if (e.key === 'r' || e.key === 'R') {
             if (isDebugMode) {
                 startDungeonGame(true);
@@ -3379,11 +3349,11 @@ function setupConnection() {
                     }
                 }, 2000);
             }
-            // --- クリア画面・ゲームオーバー画面用パケット処理 ---
+            // --- クリア・ゲームオーバー画面用パケット処理 ---
             else if (data.type === 'CONTINUE_UPDATE') {
                 continueState.active = data.active;
                 continueState.proposer = data.proposer;
-                if (returnState.active && returnState.proposer !== data.proposer) { // 排他
+                if (returnState.active && returnState.proposer !== data.proposer) { 
                     returnState.active = false; returnState.proposer = null;
                 }
                 playSignalSound('R');
@@ -3396,7 +3366,7 @@ function setupConnection() {
             else if (data.type === 'RETURN_UPDATE') {
                 returnState.active = data.active;
                 returnState.proposer = data.proposer;
-                if (continueState.active && continueState.proposer !== data.proposer) { // 排他
+                if (continueState.active && continueState.proposer !== data.proposer) { 
                     continueState.active = false; continueState.proposer = null;
                 }
                 playSignalSound('W');
@@ -3406,7 +3376,6 @@ function setupConnection() {
                 returnState.confirmTime = performance.now();
                 playFanfare();
             }
-            // 拉致開始の受信
             else if (data.type === 'ABDUCTION_START') {
                 if (!abductionState.active) {
                     startAbductionSequence();
@@ -3439,8 +3408,8 @@ function setupConnection() {
                 });
                 
                 retreatState = data.ret;
-                continueState = data.cont; // 同期
-                returnState = data.rtrn;   // 同期
+                continueState = data.cont; 
+                returnState = data.rtrn;   
 
                 fixedTime = data.t;
                 gameCleared = data.cl;
@@ -3465,7 +3434,7 @@ function setupConnection() {
                     normalIdx: data.normalIdx, 
                     rageIdx: data.rageIdx,
                     playCount: data.playCount 
-                }, true); // ゲスト側は実質的にホストのoverrideDataで常に再起と同等処理
+                });
                 
             } else if (data.type === 'SPAWN_EFFECT') {
                 if (data.kind === 'goblin') {
